@@ -106,6 +106,12 @@ $model = Users::findOne(Yii::$app->user->identity->id);
                         'visible' => $model->permission == 1 || $model->permission == 5 || $model->permission == 2 ? true : false,
                     ],
                     [
+                        'label' => 'Import qilish', 
+                        'icon' => 'truck', 
+                        'url' => ['/warehouse/import-product'],
+                        'visible' => $model->permission == 1 || $model->permission == 2 || $model->permission == 5 || $model->permission == 6 ? true : false,
+                    ],
+                    [
                         'label' => 'Omborxona hisobi', 
                         'icon' => 'university', 
                         'url' => ['/sklad/index'],
@@ -154,7 +160,25 @@ $model = Users::findOne(Yii::$app->user->identity->id);
                                 'url' => ['/brands-size/index'],
                                 'visible' => $model->permission == 1  || $model->permission == 6 ? true : false,
                             ],
-                        
+                            
+                            [
+                                'label' => 'Yuk jo\'natuvchilar', 
+                                'icon' => 'truck', 
+                                'url' => ['/consignor/index'],
+                                'visible' => $model->permission == 1 || $model->permission == 2  ? true : false,
+                            ],
+                            [
+                                'label' => 'Import tovarlar tarixi', 
+                                'icon' => 'history', 
+                                'url' => ['/sklad/import'],
+                                'visible' => $model->permission == 1 ? true : false,
+                            ],
+                            [
+                                'label' => 'Tekshirishlar tarixi', 
+                                'icon' => 'check', 
+                                'url' => ['/check/index'],
+                                'visible' => $model->permission == 1  ? true : false,
+                            ],
                             [
                                 'label' => 'O\'zgarishlar hisobi', 
                                 'icon' => 'warning', 

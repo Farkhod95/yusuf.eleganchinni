@@ -30,14 +30,15 @@ return [
         ],
         'content' => function ($data) {
             if ($data->consignor_id) {
+                $consignorName = $data->consignor0 ? Html::encode($data->consignor0->name) : '';
                 if ($data->status == 1) {
-                    return '<b style="font-size: 14px;color:#b76060" >'. $data->consignor0->name.'</b>';
+                    return '<b style="font-size: 14px;color:#b76060" >'. $consignorName.'</b>';
                 }elseif($data->status == 2){
-                    return '<b style="font-size: 14px;" >'. $data->consignor0->name .'</b>';
+                    return '<b style="font-size: 14px;" >'. $consignorName .'</b>';
                 }elseif($data->status == 3){
-                    return '<b style="font-size: 14px;color:#f59c1a" >'. $data->consignor0->name .'</b>';
+                    return '<b style="font-size: 14px;color:#f59c1a" >'. $consignorName .'</b>';
                 }else{
-                    return '<b style="font-size: 14px;" >'. $data->consignor0->name .'</b>';
+                    return '<b style="font-size: 14px;" >'. $consignorName .'</b>';
                 }
             }
         },
@@ -62,14 +63,16 @@ return [
         ],
         'content' => function ($data) {
             if ($data->created_by) {
+                $createdByName = $data->createdBy ? Html::encode($data->createdBy->surname . ' ' . $data->createdBy->name) : '';
+
                 if ($data->status == 1) {
-                    return '<b style="font-size: 14px;color:#b76060" >'. $data->createdBy->surname.' '.$data->createdBy->name.'</b>';
+                    return '<b style="font-size: 14px;color:#b76060" >'. $createdByName.'</b>';
                 }elseif($data->status == 2){
-                    return '<b style="font-size: 14px;" >'. $data->createdBy->surname.' '.$data->createdBy->name .'</b>';
+                    return '<b style="font-size: 14px;" >'. $createdByName .'</b>';
                 }elseif($data->status == 3){
-                    return '<b style="font-size: 14px;color:#f59c1a" >'. $data->createdBy->surname.' '.$data->createdBy->name .'</b>';
+                    return '<b style="font-size: 14px;color:#f59c1a" >'. $createdByName .'</b>';
                 }else{
-                    return '<b style="font-size: 14px;" >'. $data->createdBy->surname.' '.$data->createdBy->name .'</b>';
+                    return '<b style="font-size: 14px;" >'. $createdByName .'</b>';
                 }
             }
         },
@@ -346,7 +349,7 @@ return [
                 if(\Yii::$app->user->identity->permission == 1 || \Yii::$app->user->identity->permission == 5|| $model->created_by == \Yii::$app->user->identity->id){
                     $consignor_name = "";
                     if ($model->consignor_id) {
-                        $consignor_name = $model->consignor0->name;
+                        $consignor_name = $model->consignor0 ? Html::encode($model->consignor0->name) : '';
                     }
                     
                     // Create the button to trigger the modal
