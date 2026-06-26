@@ -292,9 +292,7 @@ class OrderAccountHistory extends \yii\db\ActiveRecord
             <tr>
                 <td colspan="6" style="text-align: center; width: 150px!important;"><hr></td>
             </tr>
-            <tr>
-                <td rowspan="5" style="text-align: left; width: 150px!important;"><img src="../views/image/logo4.jpg" style="height:100px; border-radius:20%;"></td>
-            </tr>
+
             <tr>
                 <th nowrap style="text-align: left; width: 200px;">Do\'kon:</th>
                 <td  ><b >{t_p},</b></td>
@@ -419,9 +417,7 @@ class OrderAccountHistory extends \yii\db\ActiveRecord
             <tr>
                 <td colspan="6" style="text-align: center; width: 150px!important;"><hr></td>
             </tr>
-            <tr>
-                <td rowspan="5" style="text-align: left; width: 150px!important;"><img src="../views/image/logo4.jpg" style="height:100px; border-radius:20%;"></td>
-            </tr>
+
             <tr>
                 <th nowrap style="text-align: left; width: 200px;">Do\'kon:</th>
                 <td  ><b >{t_p},</b></td>
@@ -582,9 +578,7 @@ class OrderAccountHistory extends \yii\db\ActiveRecord
             <tr>
                 <td colspan="6" style="text-align: center; width: 150px!important;"><hr></td>
             </tr>
-            <tr>
-                <td rowspan="5" style="text-align: left; width: 150px!important;"><img src="../views/image/logo4.jpg" style="height:100px; border-radius:20%;"></td>
-            </tr>
+
             <tr>
                 <th nowrap style="text-align: left; width: 200px;">Do\'kon:</th>
                 <td  ><b >{t_p},</b></td>
@@ -775,9 +769,7 @@ class OrderAccountHistory extends \yii\db\ActiveRecord
             <tr>
                 <td colspan="6" style="text-align: center; width: 150px!important;"><hr></td>
             </tr>
-            <tr>
-                <td rowspan="5" style="text-align: left; width: 150px!important;"><img src="../views/image/logo4.jpg" style="height:100px; border-radius:20%;"></td>
-            </tr>
+
             <tr>
                 <th nowrap style="text-align: left; width: 200px;">Do\'kon:</th>
                 <td  ><b >{t_p},</b></td>
@@ -1078,9 +1070,7 @@ class OrderAccountHistory extends \yii\db\ActiveRecord
             <tr>
                 <td colspan="6" style="text-align: center; width: 150px!important;"><hr></td>
             </tr>
-            <tr>
-                <td rowspan="5" style="text-align: left; width: 150px!important;"><img src="../views/image/logo4.jpg" style="height:100px; border-radius:20%;"></td>
-            </tr>
+
             <tr>
                 <th nowrap style="text-align: left; width: 200px;">Do\'kon:</th>
                 <td  ><b >{t_p},</b></td>

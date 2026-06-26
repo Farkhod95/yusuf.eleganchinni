@@ -31,7 +31,7 @@ use yii\widgets\ActiveForm;
         <div class="col-md-12">
                 <?= $form->field($model, 'total_debt')->textInput(['type' => 'number']) ?>
         </div>
-        <?php if ((int)Yii::$app->user->identity->permission === 1): ?>
+        <!-- <?php if ((int)Yii::$app->user->identity->permission === 1): ?>
             <div class="col-md-12">
                 <?= $form->field($model, 'worker_user_id')->label()->widget(\kartik\select2\Select2::classname(), [
                     'data' => $model->getWorkerUsers(),
@@ -43,7 +43,7 @@ use yii\widgets\ActiveForm;
                     ],
                 ]); ?>
             </div>
-        <?php endif; ?>
+        <?php endif; ?> -->
     </div>
 
     <?php if (!Yii::$app->request->isAjax): ?>

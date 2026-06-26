@@ -911,8 +911,16 @@ $(".submit").on("click", function(event){
 
   let count_old = parseInt($("#" + key).children().eq(4).text() || '0', 10);
 
-  if(count_product === 0){
-    $(".error_message").text("0 ta buyurtma berib bo'lmaydi");
+  if(count_product < 1){
+    $(".error_message").text("Bu mahsulot mavjud emas");
+    return false;
+  }
+  if(count_old < 1){
+    $(".error_message").text("Bu mahsulot mavjud emas");
+    return false;
+  }
+  if(count_product > count_old){
+    $(".error_message").text("Bu mahsulotdan " + count_old + " ta qolgan");
     return false;
   }
   if (!String(price || '').length) {
