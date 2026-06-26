@@ -14,7 +14,7 @@ return [
     // 'charset' => 'utf8',
 
     // 'class' => 'yii\db\Connection',
-    // 'dsn' => 'mysql:host=localhost;dbname=yusuf_db_25_06',
+    // 'dsn' => 'mysql:host=localhost;dbname=yusuf_db_26_06',
     // 'username' => 'root',
     // 'password' => 'root',
     // 'charset' => 'utf8',
