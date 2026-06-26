@@ -193,10 +193,11 @@ input:checked + .slider:before {
                   foreach ($warehouses as $model1) {
                   ?>
                     <tr class="handle"
-                      id="<?= $model->brand->name . "_" . $i ?>"
+                      id="warehouse_<?= $model1->id ?>"
                       data-name="<?= strtolower($model1->product_category_id ? $model1->productCategory->name : '') ?>"
                       data-brand-id="<?= $model1->brand_id ?>"
-                      data-category-id="<?= $model1->product_category_id ?>">
+                      data-category-id="<?= $model1->product_category_id ?>"
+                      data-amount-row="brand_<?= $model1->brand_id ?>_amount">
                       <td style="border-top:1px solid #bebabaff; border-bottom:1px solid #bebabaff; border-left:none; border-right:none;background-color:#efdfdf;width: 15%;"><b><?= $i ?></b></td>
                       <td style="border-top:1px solid #bebabaff; border-bottom:1px solid #bebabaff; border-left:none; border-right:none;background-color:#efdfdf;width: 15%;"><b><?= $model1->brand->name ?></b></td>
                       <td style="border-top:1px solid #bebabaff; border-bottom:1px solid #bebabaff; border-left:none; border-right:none;background-color:#efdfdf;width: 15%;"><b><?= $model1->product_category_id ? $model1->productCategory->name : '' ?></b></td>
@@ -207,7 +208,7 @@ input:checked + .slider:before {
                     </tr>
                   <?php $i++; $allCount += $model1->count; $allMarkCount += $model1->count; } ?>
 
-                  <tr class="<?= $model->brand->name ?>-amount"></tr>
+                  <tr class="brand_<?= $model->brand->id ?>_amount"></tr>
                 <?php } ?>
               </tbody>
             </table>
@@ -387,6 +388,7 @@ input:checked + .slider:before {
           <input type="hidden" name="product_id">
           <input type="hidden" name="size">
           <input type="hidden" name="key">
+          <input type="hidden" name="amount_row">
           <input type="hidden" name="maxsulot_tipi">
           <input type="hidden" name="brand_id">
           <input type="hidden" name="product_category_id">
@@ -868,6 +870,7 @@ $('.handle').on("click", function(){
   // YANGI QO‘SHIMCHA: brand_id va product_category_id ni data-* dan olish
   let brand_id = $(this).data('brand-id') || '';
   let product_category_id = $(this).data('category-id') || '';
+  let amount_row = $(this).data('amount-row') || '';
 
   $("#marka").text(mark);
   $("#name").text(name);
@@ -881,6 +884,7 @@ $('.handle').on("click", function(){
   $('input[name="size"]').val(size);
   $('input[name="maxsulot_tipi"]').val(maxsulot_tipi);
   $('input[name="key"]').val($(this).attr('id'));
+  $('input[name="amount_row"]').val(amount_row);
   // brand_id va category_id ni ham formaga yozamiz
   $('input[name="brand_id"]').val(brand_id);
   $('input[name="product_category_id"]').val(product_category_id);
@@ -909,7 +913,8 @@ $(".submit").on("click", function(event){
   countAll = countAll + count_product;
   all_sum  = all_sum + (parseFloat(price || '0') * count_product);
 
-  let count_old = parseInt($("#" + key).children().eq(4).text() || '0', 10);
+  let $warehouseRow = $(document.getElementById(key));
+  let count_old = parseInt($warehouseRow.children().eq(4).text() || '0', 10);
 
   if(count_product < 1){
     $(".error_message").text("Bu mahsulot mavjud emas");
@@ -929,10 +934,10 @@ $(".submit").on("click", function(event){
   }
   count_old = count_old - count_product;
 
-  var id = (key || '').split("_");
-  var aVal = $("." + id[0] + "-amount").children().eq(2).text();
+  var amountRow = $('input[name="amount_row"]').val();
+  var aVal = $("." + amountRow).children().eq(2).text();
   aVal = (parseInt(aVal || '0', 10) - count_product);
-  $("." + id[0] + "-amount").children().eq(2).text(aVal);
+  $("." + amountRow).children().eq(2).text(aVal);
 
   let brand_id = $('input[name="brand_id"]').val() || '';
   let product_category_id = $('input[name="product_category_id"]').val() || '';
