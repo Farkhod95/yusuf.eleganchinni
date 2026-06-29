@@ -163,23 +163,15 @@ input:checked + .slider:before {
                   </tr>
 
                   <?php
-                  $warehouses = Warehouse::find()
-                    ->alias('p')
-                    ->select(["p.*", "pc.sorting"])
-                    ->leftJoin("product_category pc", "p.product_category_id = pc.id")
-                    ->leftJoin("brands b", "p.brand_id = b.id")
-                    ->andWhere(['b.sup_status' => 1])
-                    ->andWhere(['p.brand_id' => $model->brand->id])
-                    ->orderBy(['pc.sorting' => SORT_ASC])
-                    ->all();
-
+                  $warehouses = isset($warehouseByBrand[$model->brand_id]) ? $warehouseByBrand[$model->brand_id] : [];
                   foreach ($warehouses as $model1) {
                   ?>
                     <tr class="handle"
-                      id="<?= $model->brand->name . "_" . $i ?>"
+                      id="warehouse_<?= $model1->id ?>"
                       data-name="<?= strtolower($model1->product_category_id ? $model1->productCategory->name : '') ?>"
                       data-brand-id="<?= $model1->brand_id ?>"
-                      data-category-id="<?= $model1->product_category_id ?>">
+                      data-category-id="<?= $model1->product_category_id ?>"
+                      data-amount-row="brand_<?= $model1->brand_id ?>_amount">
                       <td style="border-top:1px solid #bebabaff; border-bottom:1px solid #bebabaff; border-left:none; border-right:none;background-color:#efdfdf;width: 15%;"><b><?= $i ?></b></td>
                       <td style="border-top:1px solid #bebabaff; border-bottom:1px solid #bebabaff; border-left:none; border-right:none;background-color:#efdfdf;width: 15%;"><b><?= $model1->brand->name ?></b></td>
                       <td style="border-top:1px solid #bebabaff; border-bottom:1px solid #bebabaff; border-left:none; border-right:none;background-color:#efdfdf;width: 15%;"><b><?= $model1->product_category_id ? $model1->productCategory->name : '' ?></b></td>
@@ -190,7 +182,7 @@ input:checked + .slider:before {
                     </tr>
                   <?php $i++; $allCount += $model1->count; $allMarkCount += $model1->count; } ?>
 
-                  <tr class="<?= $model->brand->name ?>-amount"></tr>
+                  <tr class="brand_<?= $model->brand->id ?>_amount"></tr>
                 <?php } ?>
               </tbody>
             </table>
@@ -216,17 +208,15 @@ input:checked + .slider:before {
         <div class="table-responsive">
           <div class="form-group row m-b-15">
             <div class="col-sm-5">
-              <select action="<?= Url::toRoute(['order-account/qarz'])?>" class="form-control" name="customer_name" id="myselect" required>
-                <option></option>
-                <?php foreach ($clients as $client) { ?>
-                  <option value="<?= $client->id ?>"><?= $client->fio ?></option>
-                <?php } ?>
-              </select>
               <?= Select2::widget([
                 'name' => 'customer_name',
                 'id' => 'myselect',
-                'data' => ArrayHelper::map($clients, 'fio', 'fio'),
-                'options' => ['placeholder' => 'Mijoz tanlang','style' => 'text-align:right;'],
+                'data' => ArrayHelper::map($clients, 'id', 'fio'),
+                'options' => [
+                  'placeholder' => 'Mijoz tanlang',
+                  'style' => 'text-align:right;',
+                  'action' => Url::toRoute(['order-account/qarz']),
+                ],
                 'pluginOptions' => ['allowClear' => true],
               ]); ?>
             </div>
@@ -406,6 +396,7 @@ input:checked + .slider:before {
             </div>
           </div>
           <div class="modal-footer">
+            <span class="vozvrat_submit_error text-danger pull-left"></span>
             <a href="javascript:;" class="btn btn-white" data-dismiss="modal">Bekor qilish</a>
             <button type="submit" id="sellSubmitButton" class="btn btn-danger">Vozvratni tasdiqlash</button>
           </div>
@@ -523,6 +514,7 @@ $('#cars').on('change', function(e){
 $("#buy").submit(function(event){
   event.preventDefault();
   let action = $(this).attr("action");
+  $(".vozvrat_submit_error").text("");
 
   let payload = {
     customer_name: $('select[name="customer_name"]').val(),
@@ -533,7 +525,7 @@ $("#buy").submit(function(event){
     summa_som: $('input[name="summa_som"]').val(),
     summa_karta: $('input[name="summa_karta"]').val(),
     comment: $('textarea[name="comment"]').val(),
-    tasdiq_check: $('input[name="tasdiq_check"]').val(),
+    tasdiq_check: $('input[name="tasdiq_check"]').is(':checked') ? 1 : 0,
     total: $("#count_porduct").text(),
     count: $("#total_product").text(),
     total_product_sum: $("#total_product_sum").text(),
@@ -541,6 +533,14 @@ $("#buy").submit(function(event){
   };
 
   let hasError = false;
+  if (!payload.customer_name) {
+    $(".vozvrat_submit_error").text("Mijozni tanlang.");
+    hasError = true;
+  }
+  if (!payload.product_details || payload.product_details === '[]') {
+    $(".vozvrat_submit_error").text("Vozvrat uchun mahsulot tanlang.");
+    hasError = true;
+  }
   let s1 = parseFloat($('input[name="all_summ_dollar"]').val());
   let totalProductSum = parseFloat($("#total_product_sum").text());
   if (isNaN(s1) || s1 < 0) {
@@ -568,19 +568,26 @@ $("#buy").submit(function(event){
     url: action,
     data: payload,
     method: "POST",
+    dataType: "json",
     beforeSend: function() {
       $("#sellSubmitButton").prop("disabled", true).html('<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Jarayonda...');
     }
   }).done(function(data) {
-    alert(data);
-    $("#modal-dialog2").modal("hide");
-    $(this).addClass("done");
-  }).fail(function(jqXHR, textStatus, errorThrown) {
-    console.error("Request failed: " + textStatus + ", " + errorThrown);
-    $("#modal-dialog2").modal("hide");
+    if (data && data.success && data.redirect) {
+      window.location.href = data.redirect;
+      return;
+    }
+
+    $(".vozvrat_submit_error").text((data && data.message) ? data.message : "Vozvratni saqlashda xatolik yuz berdi.");
+    $("#sellSubmitButton").prop("disabled", false).html('Vozvratni tasdiqlash');
+  }).fail(function(jqXHR) {
+    var message = "Vozvratni saqlashda xatolik yuz berdi.";
+    if (jqXHR.responseJSON && jqXHR.responseJSON.message) {
+      message = jqXHR.responseJSON.message;
+    }
+    $(".vozvrat_submit_error").text(message);
+    $("#sellSubmitButton").prop("disabled", false).html('Vozvratni tasdiqlash');
   }).always(function() {
-    $("#sellSubmitButton").prop("disabled", false).html('Sotishni tasdiqlash');
-    $("#modal-dialog2").modal("hide");
   });
 });
 
@@ -685,16 +692,26 @@ $(".submit").on("click", function(event){
     $(".error_message").text("0 ta buyurtma berib bo'lmaydi");
     return false;
   }
+  if(count_product < 0){
+    $(".error_message").text("Manfiy son kiritib bo'lmaydi");
+    return false;
+  }
   if (!String(price || '').length) {
     $(".error_message_narx").text("Mahsulot narxini kiriting.");
     return false;
   }
+  if (parseFloat(price) < 0) {
+    $(".error_message_narx").text("Mahsulot narxi manfiy bo'lmaydi.");
+    return false;
+  }
   count_old = count_old - count_product;
 
-  var id = (key || '').split("_");
-  var aVal = $("." + id[0] + "-amount").children().eq(2).text();
+  var amountRowClass = $("#" + key).attr("data-amount-row") || "";
+  var aVal = amountRowClass ? $("." + amountRowClass).children().eq(2).text() : "0";
   aVal = (parseInt(aVal || '0', 10) - count_product);
-  $("." + id[0] + "-amount").children().eq(2).text(aVal);
+  if (amountRowClass) {
+    $("." + amountRowClass).children().eq(2).text(aVal);
+  }
 
   let brand_id = $('input[name="brand_id"]').val() || '';
   let product_category_id = $('input[name="product_category_id"]').val() || '';
@@ -814,17 +831,17 @@ function bcLoadCategories(brandId){
 function bcApplyFilter(){
   var brandId   = $('#brandFilter').val();
   var brandName = brandId ? (window.BRAND_MAP ? (BRAND_MAP[brandId] || '') : '') : '';
-  var catText   = ($('#categoryFilter option:selected').text() || '').toLowerCase();
+  var catId     = $('#categoryFilter').val();
 
   // .handle qatorlari
   $('#showRes .handle').each(function(){
     var $r       = $(this);
     var rowBrand = ($r.children().eq(1).text() || '').trim();           // Model ustuni
-    var rowCat   = ($r.attr('data-name') || '').toLowerCase();          // data-name = kategoriya nomi (lower)
+    var rowCatId = String($r.attr('data-category-id') || '');
     var visible  = true;
 
     if (brandName && rowBrand !== brandName) visible = false;
-    if (catText   && rowCat   !== catText)   visible = false;
+    if (catId && rowCatId !== String(catId)) visible = false;
 
     $r.toggle(visible);
   });

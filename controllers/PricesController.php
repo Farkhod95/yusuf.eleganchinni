@@ -179,7 +179,7 @@ class PricesController extends Controller
             Yii::$app->response->format = Response::FORMAT_JSON;
             if($request->isGet){
                 return [
-                    'title'=> "Narxni yangilash",
+                    'title'=> "Haqiqiy narxni yangilash",
                     'content'=>$this->renderAjax('update', [
                         'model' => $model,
                     ]),
@@ -190,7 +190,7 @@ class PricesController extends Controller
                 return ['forceClose'=>true,'forceReload'=>'#crud-datatable-pjax'];    
             }else{
                  return [
-                    'title'=> "Narxni yangilash",
+                    'title'=> "Haqiqiy narxni yangilash",
                     'content'=>$this->renderAjax('update', [
                         'model' => $model,
                     ]),

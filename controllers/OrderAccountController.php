@@ -4,12 +4,15 @@ namespace app\controllers;
 
 use Yii;
 use app\models\OrderAccount;
+use app\models\OrderAccountCartDraft;
 use app\models\OrderAccountSearch;
 use yii\web\Controller;
+use yii\web\BadRequestHttpException;
 use yii\web\NotFoundHttpException;
 use yii\filters\VerbFilter;
 use \yii\web\Response;
 use yii\helpers\Html;
+use yii\helpers\Url;
 use yii\filters\AccessControl;
 use app\models\Brands;
 use app\models\ProductCategory;
@@ -112,6 +115,98 @@ class OrderAccountController extends Controller
         return $qarz_sum;
     }
 
+    private function resolveCartClientId($clientValue)
+    {
+        if (!$clientValue) {
+            return null;
+        }
+
+        if (ctype_digit((string)$clientValue)) {
+            $client = Client::find()->where(['id' => (int)$clientValue])->one();
+        } else {
+            $client = Client::find()->where(['fio' => $clientValue])->one();
+        }
+
+        return $client ? (int)$client->id : null;
+    }
+
+    public function actionCartdraftload($client_id)
+    {
+        Yii::$app->response->format = Response::FORMAT_JSON;
+        $clientId = $this->resolveCartClientId($client_id);
+        if (!$clientId) {
+            return ['success' => false, 'items' => [], 'total_count' => 0, 'total_sum' => 0];
+        }
+
+        $draft = OrderAccountCartDraft::find()
+            ->where(['client_id' => $clientId, 'user_id' => Yii::$app->user->id])
+            ->one();
+
+        if (!$draft) {
+            return ['success' => true, 'items' => [], 'total_count' => 0, 'total_sum' => 0];
+        }
+
+        $items = json_decode($draft->product_details, true);
+        if (!is_array($items)) {
+            $items = [];
+        }
+
+        return [
+            'success' => true,
+            'items' => $items,
+            'total_count' => (int)$draft->total_count,
+            'total_sum' => (float)$draft->total_sum,
+        ];
+    }
+
+    public function actionCartdraftsave()
+    {
+        Yii::$app->response->format = Response::FORMAT_JSON;
+        $request = Yii::$app->request;
+        $clientId = $this->resolveCartClientId($request->post('client_id'));
+        if (!$clientId) {
+            return ['success' => false];
+        }
+
+        $productDetails = $request->post('product_details', '[]');
+        $items = json_decode($productDetails, true);
+        if (!is_array($items)) {
+            $items = [];
+            $productDetails = '[]';
+        }
+
+        if (empty($items)) {
+            OrderAccountCartDraft::deleteAll(['client_id' => $clientId, 'user_id' => Yii::$app->user->id]);
+            return ['success' => true];
+        }
+
+        $draft = OrderAccountCartDraft::find()
+            ->where(['client_id' => $clientId, 'user_id' => Yii::$app->user->id])
+            ->one();
+        if (!$draft) {
+            $draft = new OrderAccountCartDraft();
+            $draft->client_id = $clientId;
+            $draft->user_id = Yii::$app->user->id;
+        }
+
+        $draft->product_details = $productDetails;
+        $draft->total_count = (int)$request->post('total_count', 0);
+        $draft->total_sum = round((float)$request->post('total_sum', 0), 2);
+
+        return ['success' => (bool)$draft->save(false)];
+    }
+
+    public function actionCartdraftclear()
+    {
+        Yii::$app->response->format = Response::FORMAT_JSON;
+        $clientId = $this->resolveCartClientId(Yii::$app->request->post('client_id'));
+        if ($clientId) {
+            OrderAccountCartDraft::deleteAll(['client_id' => $clientId, 'user_id' => Yii::$app->user->id]);
+        }
+
+        return ['success' => true];
+    }
+
     public function actionQarztul(){
         // Requestni chop etish
         
@@ -129,13 +224,57 @@ class OrderAccountController extends Controller
         $tul_qarz_zdacha_dollar = $request->post('tul_qarz_zdacha_dollar');
         $tul_qarz_zdacha_sum = $request->post('tul_qarz_zdacha_sum');
 
+        $tul_qarz_sikidka = (float)$tul_qarz_sikidka;
+        $tul_qarz_sum_dollar = (float)$tul_qarz_sum_dollar;
+        $tul_qarz_sum_som = (float)$tul_qarz_sum_som;
+        $tul_qarz_summ_cart = (float)$tul_qarz_summ_cart;
+        $tul_qarz_sum_transfer = (float)$tul_qarz_sum_transfer;
+        $tul_qarz_zdacha_dollar = (float)$tul_qarz_zdacha_dollar;
+        $tul_qarz_zdacha_sum = (float)$tul_qarz_zdacha_sum;
+
+        if (!$clients_id || !$qarz_tul_date) {
+            throw new BadRequestHttpException('Mijoz va sanani tanlang.');
+        }
+
+        foreach ([
+            $tul_qarz_sikidka,
+            $tul_qarz_sum_dollar,
+            $tul_qarz_sum_som,
+            $tul_qarz_summ_cart,
+            $tul_qarz_sum_transfer,
+            $tul_qarz_zdacha_dollar,
+            $tul_qarz_zdacha_sum,
+        ] as $amount) {
+            if ($amount < 0) {
+                throw new BadRequestHttpException('Qarz tolov summalari manfiy bolmasligi kerak.');
+            }
+        }
+
         $all_tulangan_summa_dollar = round($tul_qarz_sum_dollar + $tul_qarz_sikidka,2);
+        if ($all_tulangan_summa_dollar <= 0) {
+            throw new BadRequestHttpException('Qarz tolash summasini kiriting.');
+        }
         // echo '<pre>';
         // print_r($all_tulangan_summa_dollar);
         // echo '</pre>';
         $client = Client::find()->where(['id' => $clients_id])->one();
+        if (!$client) {
+            throw new BadRequestHttpException('Mijoz topilmadi.');
+        }
+
+        $orderAccount = OrderAccount::find()->where(['client_id' => $clients_id])->one();
+        if (!$orderAccount) {
+            throw new BadRequestHttpException('Mijoz qarz hisobi topilmadi.');
+        }
+
         $exchangeRate = ExchangeRate::find()->where(['id' => 1])->one();
+        if (!$exchangeRate) {
+            throw new BadRequestHttpException('Dollar kursi topilmadi.');
+        }
         $dollar_kurs =  $exchangeRate->dollar;
+
+        $transaction = Yii::$app->db->beginTransaction();
+        try {
       
         // $orderAccountHistory = OrderAccountHistory::find()->where(['client_id' => $clients_id])->all();
         $orderAccountHistory = OrderAccountHistory::find()
@@ -150,13 +289,12 @@ class OrderAccountController extends Controller
             $value->is_debt = 1;
             $value->save(false);
         }
-        $orderAccount = OrderAccount::find()->where(['client_id' => $clients_id])->one();
         
         $model = new DebtRepayment();  
         $model->client_id = $clients_id;
         $model->order_account_id = $orderAccount->id;
         $model->date = $qarz_tul_date;
-        $model->total_debt_old = $qarz_client_summ;
+        $model->total_debt_old = $orderAccount->total_debt;
         $model->exchange_rate = $dollar_kurs;
 
         $model->discount_amount = $tul_qarz_sikidka;
@@ -170,9 +308,9 @@ class OrderAccountController extends Controller
 
         $model->all_summ_dollar = $all_tulangan_summa_dollar;
 
-        $orderAccount->total_debt = $orderAccount->total_debt - $all_tulangan_summa_dollar;
+        $orderAccount->total_debt = round($orderAccount->total_debt - $all_tulangan_summa_dollar, 2);
         $orderAccount->date_last_debt_payment = $qarz_tul_date;
-        $orderAccount->save();
+        $orderAccount->save(false);
 
         $tul_qarz_sikidkatext = $tul_qarz_sikidka !=0? (", ".$tul_qarz_sikidka." $ chegirma qilib berildi"): "";
         $elegantHistoryUpdate = new ElegantHistoryUpdate();
@@ -184,8 +322,32 @@ class OrderAccountController extends Controller
 
         $model->total_debt = $orderAccount->total_debt;
         $model->save(false);
-        
+
+        $transaction->commit();
+
+        if ($request->isAjax) {
+            Yii::$app->response->format = Response::FORMAT_JSON;
+            return [
+                'success' => true,
+                'redirect' => Url::to(['/debt-repayment/index']),
+            ];
+        }
+
         return $this->redirect(['/debt-repayment/index']);
+        } catch (\Throwable $e) {
+            $transaction->rollBack();
+
+            if ($request->isAjax) {
+                Yii::$app->response->format = Response::FORMAT_JSON;
+                Yii::$app->response->statusCode = 400;
+                return [
+                    'success' => false,
+                    'message' => $e->getMessage(),
+                ];
+            }
+
+            throw $e;
+        }
     }
 
     public function actionAccept()
@@ -218,15 +380,54 @@ class OrderAccountController extends Controller
         $all_sum = $request->post('all_sum');
         $product_details = $request->post('product_details');
         $contact = json_decode($product_details, true);
+        if (!is_array($contact) || empty($contact)) {
+            throw new BadRequestHttpException('Mijozda hech qanday buyurtma yoq.');
+        }
+
+        $total_debts = (float)$total_debts;
+        $exchange_rates = (float)$exchange_rates;
+        $discount_amounts = (float)$discount_amounts;
+        $sum_dollars = (float)$sum_dollars;
+        $dollar_sumda = (float)$dollar_sumda;
+        $sum_soms = (float)$sum_soms;
+        $sum_carts = (float)$sum_carts;
+        $sum_transferss = (float)$sum_transferss;
+        $zdacha_dollar = (float)$zdacha_dollar;
+        $zdacha_sum = (float)$zdacha_sum;
+        $count = (int)$count;
+        $all_sum = (float)$all_sum;
+
+        foreach ([
+            $total_debts,
+            $exchange_rates,
+            $discount_amounts,
+            $sum_dollars,
+            $dollar_sumda,
+            $sum_soms,
+            $sum_carts,
+            $sum_transferss,
+            $zdacha_dollar,
+            $zdacha_sum,
+            $count,
+            $all_sum,
+        ] as $amount) {
+            if ($amount < 0) {
+                throw new BadRequestHttpException('Buyurtma summalari manfiy bolmasligi kerak.');
+            }
+        }
 
         $all_pay_summ = round($sum_dollars, 2);
         // $contact = $post['OrderAccount']['allValue'];
+
+        $transaction = Yii::$app->db->beginTransaction();
+        try {
         
         $client = Client::find()->where(['id' => $clients_id])->one();
         if (!isset($client)){                    
             $client_cr = new Client();
             $client_cr->fio = $clients_id;
             $client_cr->save();
+            $client = $client_cr;
             $client_id = $client_cr->id;                        
         }else{
             $client_id = $client->id;   
@@ -235,6 +436,49 @@ class OrderAccountController extends Controller
         // print_r(date('Y-m-d H:i:s',strtotime($dates.' '.date('H:i:s'))));
         // echo '</pre>';
         $orderAccount = OrderAccount::find()->where(['client_id' => $client_id])->one();
+        $orderTypeHelper = $orderAccount ?: new OrderAccount();
+
+        $stockRequests = [];
+        foreach ($contact as $value) {
+            $brand_list = Brands::find()->where(['id' => $value['brand_id']])->one();
+            $product_category_list = ProductCategory::find()
+                ->where(['id' => (int)$value['product_category_id']])
+                ->one();
+            $type_sklad_list = TypeSklad::find()->where(['name' => $value['joy']])->one();
+            $typeId = $orderTypeHelper->getTypeNameView($value['tip']);
+            $countRequested = (int)$value['count'];
+
+            if (!$brand_list || !$product_category_list || !$type_sklad_list || !$typeId || $countRequested < 1) {
+                throw new BadRequestHttpException('Buyurtma mahsuloti notogri.');
+            }
+
+            $size = (float)$value['size'];
+            $warehouseValue = Warehouse::find()
+                ->andWhere(['product_category_id' => (int)$product_category_list->id])
+                ->andWhere(['brand_id' => (int)$brand_list->id])
+                ->andWhere(['size' => $size])
+                ->andWhere(['type' => $typeId])
+                ->one();
+
+            if (!$warehouseValue || (int)$warehouseValue->count < 1) {
+                throw new BadRequestHttpException('Bu mahsulot mavjud emas.');
+            }
+
+            $stockKey = implode(':', [(int)$brand_list->id, (int)$product_category_list->id, $size, (int)$typeId]);
+            if (!isset($stockRequests[$stockKey])) {
+                $stockRequests[$stockKey] = [
+                    'warehouse' => $warehouseValue,
+                    'count' => 0,
+                ];
+            }
+            $stockRequests[$stockKey]['count'] += $countRequested;
+        }
+
+        foreach ($stockRequests as $stockRequest) {
+            if ($stockRequest['count'] > (int)$stockRequest['warehouse']->count) {
+                throw new BadRequestHttpException('Bu mahsulotdan ' . (int)$stockRequest['warehouse']->count . ' ta qolgan.');
+            }
+        }
             
         if ($orderAccount) {
             // $orderAccount->total_debt = $total_debts;
@@ -330,7 +574,9 @@ class OrderAccountController extends Controller
 
         foreach ($contact as $value) {
             $brand_list = Brands::find()->where(['id' => $value['brand_id']])->one();
-            $product_category_list = ProductCategory::find()->where(['id' => $value['product_category_id']])->one();
+            $product_category_list = ProductCategory::find()
+                ->where(['id' => (int)$value['product_category_id']])
+                ->one();
             $type_sklad_list = TypeSklad::find()->where(['name' => $value['joy']])->one();
 
             if ($value['joy'] == "Ombor") {
@@ -339,10 +585,14 @@ class OrderAccountController extends Controller
                 $status_order_dukon = 1;
             }
 
-            $typeId = $orderAccount->getTypeNameView($value['tip']);
+            $typeId = $orderTypeHelper->getTypeNameView($value['tip']);
             $size   = (float)$value['size'];
             $price  = (float)$value['price'];
             $count  = (int)$value['count'];
+
+            if (!$brand_list || !$product_category_list || !$type_sklad_list || !$typeId || $count < 1 || $price < 0) {
+                throw new BadRequestHttpException('Buyurtma mahsuloti notogri.');
+            }
 
             $productAccount = ProductAccount::find()
                 ->andWhere(['order_account_id' => $orderAccount_id])
@@ -424,8 +674,13 @@ class OrderAccountController extends Controller
 
             // Ombor soni
             if ($warehouseValue && $type_sklad_list->id == 1) {
-                $warehouseValue->count = $warehouseValue->count - $count;
-                $warehouseValue->save(false);
+                $updatedWarehouseRows = Warehouse::updateAllCounters(
+                    ['count' => -$count],
+                    ['and', ['id' => $warehouseValue->id], ['>=', 'count', $count]]
+                );
+                if (!$updatedWarehouseRows) {
+                    throw new BadRequestHttpException('Bu mahsulotdan ' . (int)$warehouseValue->count . ' ta qolgan.');
+                }
             }
 
             // Umumiy summalar
@@ -475,8 +730,8 @@ class OrderAccountController extends Controller
             $orderAccountProfHistory->all_product_sum = $all_summ;
             $orderAccountProfHistory->save();
 
-            $keshbekClient = Client::find()->where(['id' => $clients_id])->one();
-            if ($keshbekClient->keshbek) {
+            $keshbekClient = Client::find()->where(['id' => $client_id])->one();
+            if ($keshbekClient && $keshbekClient->keshbek) {
                 $keshbekHistory = new KeshbekHistory();
                 $keshbekHistory->order_account_history_id = $orderAccountHistory_id;
                 $keshbekHistory->client_id = $keshbekClient->id;
@@ -487,7 +742,32 @@ class OrderAccountController extends Controller
             }
             
         }
+        OrderAccountCartDraft::deleteAll(['client_id' => $client_id, 'user_id' => Yii::$app->user->id]);
+        $transaction->commit();
+
+        if ($request->isAjax) {
+            Yii::$app->response->format = Response::FORMAT_JSON;
+            return [
+                'success' => true,
+                'redirect' => Url::to(['/order-account-history/index']),
+            ];
+        }
+
         return $this->redirect(['/order-account-history/index']);
+        } catch (\Throwable $e) {
+            $transaction->rollBack();
+
+            if ($request->isAjax) {
+                Yii::$app->response->format = Response::FORMAT_JSON;
+                Yii::$app->response->statusCode = 400;
+                return [
+                    'success' => false,
+                    'message' => $e->getMessage(),
+                ];
+            }
+
+            throw $e;
+        }
     }
 
     public function actionClient($id='')
@@ -513,18 +793,32 @@ class OrderAccountController extends Controller
     {    
         // $warehouse = Warehouse::find()->select(['brand_id'])->groupBy(['brand_id'])->orderBy(['product_category.sorting' => SORT_ASC])->all();
             
-        $warehouse = Warehouse::find()
-        ->alias('p')
-        ->select(["p.*", "pc.sorting"])
-        ->leftJoin("brands pc", "p.brand_id = pc.id")
-        ->where(['pc.sup_status' => 1])
-        ->orderBy(['pc.sorting' => SORT_ASC])
-        ->groupBy(['p.brand_id'])->all();
+        $warehouses = Warehouse::find()
+            ->alias('p')
+            ->with(['brand', 'productCategory'])
+            ->leftJoin("brands b", "p.brand_id = b.id")
+            ->leftJoin("product_category pc", "p.product_category_id = pc.id")
+            ->where(['b.sup_status' => 1])
+            ->orderBy(['b.sorting' => SORT_ASC, 'pc.sorting' => SORT_ASC])
+            ->all();
+
+        $warehouse = [];
+        $warehouseByBrand = [];
+        foreach ($warehouses as $item) {
+            if (!isset($warehouseByBrand[$item->brand_id])) {
+                $warehouseByBrand[$item->brand_id] = [];
+                $warehouse[] = $item;
+            }
+            $warehouseByBrand[$item->brand_id][] = $item;
+        }
         // echo "<pre>";
         // print_r($warehouse);
         // echo "<pre>";
         // $warehouses = Warehouse::find()->all();
-        return $this->render('orders', ['warehouse' => $warehouse]);
+        return $this->render('orders', [
+            'warehouse' => $warehouse,
+            'warehouseByBrand' => $warehouseByBrand,
+        ]);
     }
 
     public function actionTopClient()

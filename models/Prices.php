@@ -42,7 +42,7 @@ class Prices extends \yii\db\ActiveRecord
     {
         return [
             'id' => 'ID',
-            'price' => 'Narx ($)',
+            'price' => 'Mahsulot haqiqiy narxi ($)',
             'warehouse_id' => 'Warehouse ID',
         ];
     }

@@ -118,150 +118,189 @@ class WarehouseController extends Controller
 
 
     public function actionAccept(){
-        // Requestni chop etish
-        
         $request = Yii::$app->request;
-        $consignor_id = $request->post('customer_name');
-        $my_total_debts = $request->post('jami_qarzi');
+
+        $errorResponse = function ($message) use ($request) {
+            if ($request->isAjax) {
+                Yii::$app->response->format = Response::FORMAT_JSON;
+                return ['success' => false, 'message' => $message];
+            }
+            Yii::$app->session->setFlash('error', $message);
+            return $this->redirect(['import-product']);
+        };
+
+        $successResponse = function () use ($request) {
+            if ($request->isAjax) {
+                Yii::$app->response->format = Response::FORMAT_JSON;
+                return ['success' => true, 'redirect' => \yii\helpers\Url::to(['/sklad/index'])];
+            }
+            return $this->redirect(['/sklad/index']);
+        };
+
+        $consignor_id = (int)$request->post('customer_name');
         $dates = $request->post('order_date');
         $exchange_rates = $request->post('dollar_kurs');
-
-        $discount_amounts = $request->post('chegirma_summa');
-        $sum_dollars = $request->post('summa_dollor');
-        $dollar_sumda = $request->post('dollar_sumda');
-        // $sum_soms = $request->post('summa_som');
-        // $sum_carts = $request->post('summa_karta');
-        // $sum_transferss = $request->post('summa_transfer');
+        $discount_amounts = $request->post('chegirma_summa', 0);
+        $sum_dollars = $request->post('summa_dollor', 0);
         $comments = $request->post('comment');
         $car_number = trim((string)$request->post('car_number'));
-        $tasdiq_check = $request->post('tasdiq_check');
-        
-        $count = $request->post('count');
-        $all_sum = $request->post('all_sum');
         $product_details = $request->post('product_details');
         $importProducts = json_decode($product_details, true);
 
         if ($car_number === '') {
-            return 'Avtomobil raqamini kiriting.';
+            return $errorResponse('Avtomobil raqamini kiriting.');
+        }
+
+        if (!$dates || strtotime($dates) === false) {
+            return $errorResponse('Sanani togri kiriting.');
+        }
+
+        if (!is_numeric($exchange_rates) || (float)$exchange_rates <= 0) {
+            return $errorResponse('Dollar kursini togri kiriting.');
+        }
+
+        if (!is_numeric($sum_dollars) || (float)$sum_dollars < 0) {
+            return $errorResponse('Jami summa ($) ni togri kiriting.');
+        }
+
+        if (!is_numeric($discount_amounts) || (float)$discount_amounts < 0) {
+            return $errorResponse('Chegirma ($) ni togri kiriting.');
+        }
+
+        if (!is_array($importProducts) || empty($importProducts)) {
+            return $errorResponse('Import qilinadigan mahsulotlarni kiriting.');
         }
 
         $consignor = Consignor::find()->where(['id' => $consignor_id])->one();
-            
-        $sklad = new Sklad();
-        $sklad->created_by = Yii::$app->user->identity->id;
-        $sklad->comment = $comments;
-        $sklad->car_number = $car_number;
-        $sklad->given_sum_dollar = 0;
-        $sklad->sum_dollar = $sum_dollars;
-        $sklad->exchange_rate = $exchange_rates;
-        $sklad->discount_amount = $discount_amounts;
-        $sklad->my_total_debt = 0;
-        $sklad->old_my_total_debt = $my_total_debts;
-        $sklad->cr_date_time = date('Y-m-d H:i:s');
-        $sklad->cr_date = date('Y-m-d',strtotime($dates));
-        $sklad->consignor_id = $consignor->id;
-        $sklad->status = 1;
-        $sklad->actived = 1;
-        $sklad->save(false);
+        if (!$consignor) {
+            return $errorResponse('Yuk jonatuvchi topilmadi.');
+        }
 
-        
-
-        $sum_all_product = 0;
-        $given_sum_dollars = 0;
+        $normalizedProducts = [];
         foreach ($importProducts as $value) {
-            // echo '<pre>';
-            // print_r("value['brand_id'] ". $value['brand_id'] . "<br/>");
-            // print_r("value['product_category_id'] ". $value['product_category_id']."<br/>");
-            // print_r("value['type'] ". $value['type']."<br/>");
-            // print_r("value['size'] ". $value['size']."<br/>");
-            // echo '</pre>';
-            $brand_list = Brands::find()->where(['id' => $value['brand_id']])->one();
-            $product_category_list = ProductCategory::find()->where(['id' => $value['product_category_id']])->one();
-            $type_sklad_list = TypeSklad::find()->where(['name' => $value['joy']])->one();
+            $brandId = isset($value['brand_id']) ? (int)$value['brand_id'] : 0;
+            $categoryId = isset($value['product_category_id']) ? (int)$value['product_category_id'] : 0;
+            $typeName = isset($value['tip']) ? trim((string)$value['tip']) : '';
+            $typeId = (new Sklad())->getTypeNameView($typeName);
+            $size = isset($value['size']) ? (float)$value['size'] : 0;
+            $price = isset($value['price']) ? (float)$value['price'] : -1;
+            $productCount = isset($value['count']) ? (int)$value['count'] : 0;
 
+            if ($brandId <= 0 || $categoryId <= 0 || !$typeId || $price < 0 || $productCount <= 0) {
+                return $errorResponse('Mahsulot malumotlari notogri.');
+            }
 
-            $warehouse = Warehouse::find()
-                            ->andWhere(['brand_id' => $brand_list->id])
-                            ->andWhere(['product_category_id' => $product_category_list->id])
-                            ->andWhere(['type' => $sklad->getTypeNameView($value['tip'])])
-                            ->andWhere(['size' => (float)$value['size']])->one();
-            
-            if (!$warehouse) {
-                $relative = new Warehouse();
-                $relative->brand_id = $brand_list->id;
-                $relative->product_category_id = $product_category_list->id;
-                $relative->size = $value['size'];
-                $relative->count = $value['count'];
-                $relative->price = $value['price'];
-                $relative->type = $sklad->getTypeNameView($value['tip']);
+            $brand = Brands::find()->where(['id' => $brandId])->one();
+            $category = ProductCategory::find()->where(['id' => $categoryId])->one();
+            if (!$brand || !$category) {
+                return $errorResponse('Mahsulot topilmadi.');
+            }
 
-                $relative->all_my_total_debt = 0;
-                $relative->all_sum_dollar = 0;
-                $relative->all_discount_amount = 0;
-                // $relative->order_account_statuse = $value['order_account_statuses'];
+            $normalizedProducts[] = [
+                'brand_id' => $brandId,
+                'product_category_id' => $categoryId,
+                'size' => $size,
+                'type' => $typeId,
+                'price' => $price,
+                'count' => $productCount,
+            ];
+        }
 
-                $relative->cr_date = date('Y-m-d',strtotime($dates));
-                $relative->save(false);
-                $given_sum_dollars = $given_sum_dollars + (float)$value['price'] * (float)$value['count'];
+        $transaction = Yii::$app->db->beginTransaction(\yii\db\Transaction::SERIALIZABLE);
+        try {
+            $sklad = new Sklad();
+            $sklad->created_by = Yii::$app->user->identity->id;
+            $sklad->comment = $comments;
+            $sklad->car_number = $car_number;
+            $sklad->given_sum_dollar = 0;
+            $sklad->sum_dollar = (float)$sum_dollars;
+            $sklad->exchange_rate = (float)$exchange_rates;
+            $sklad->discount_amount = (float)$discount_amounts;
+            $sklad->my_total_debt = 0;
+            $sklad->old_my_total_debt = 0;
+            $sklad->cr_date_time = date('Y-m-d H:i:s');
+            $sklad->cr_date = date('Y-m-d', strtotime($dates));
+            $sklad->consignor_id = $consignor->id;
+            $sklad->status = 1;
+            $sklad->actived = 1;
+            if (!$sklad->save(false)) {
+                throw new \RuntimeException('Import saqlanmadi.');
+            }
+
+            $given_sum_dollars = 0;
+            foreach ($normalizedProducts as $value) {
+                $warehouse = Warehouse::find()
+                    ->andWhere(['brand_id' => $value['brand_id']])
+                    ->andWhere(['product_category_id' => $value['product_category_id']])
+                    ->andWhere(['type' => $value['type']])
+                    ->andWhere(['size' => $value['size']])
+                    ->one();
+
+                if (!$warehouse) {
+                    $warehouse = new Warehouse();
+                    $warehouse->brand_id = $value['brand_id'];
+                    $warehouse->product_category_id = $value['product_category_id'];
+                    $warehouse->size = $value['size'];
+                    $warehouse->count = 0;
+                    $warehouse->price = $value['price'];
+                    $warehouse->type = $value['type'];
+                    $warehouse->all_my_total_debt = 0;
+                    $warehouse->all_sum_dollar = 0;
+                    $warehouse->all_discount_amount = 0;
+                    $warehouse->cr_date = date('Y-m-d', strtotime($dates));
+                }
+
+                $warehouse->count = (int)$warehouse->count + $value['count'];
+                if (!$warehouse->save(false)) {
+                    throw new \RuntimeException('Ombor mahsuloti saqlanmadi.');
+                }
+
+                $given_sum_dollars += $value['price'] * $value['count'];
 
                 $relativeHistory = new WarehouseHistory();
                 $relativeHistory->sklad_id = $sklad->id;
-                $relativeHistory->brand_id = $brand_list->id;
-                $relativeHistory->product_category_id = $product_category_list->id;
+                $relativeHistory->brand_id = $value['brand_id'];
+                $relativeHistory->product_category_id = $value['product_category_id'];
                 $relativeHistory->size = $value['size'];
-                $relativeHistory->type = $sklad->getTypeNameView($value['tip']);
-                $relativeHistory->price = $value['price'];
                 $relativeHistory->count = $value['count'];
+                $relativeHistory->type = $value['type'];
+                $relativeHistory->price = $value['price'];
                 $relativeHistory->cr_date = date('Y-m-d H:i:s');
                 $relativeHistory->cr_date_time = date('Y-m-d H:i:s');
-                $relativeHistory->save(false);
-                $error = $relativeHistory->errors;
-                // $sum_all_product = $sum_all_product + float($value['price']) * float($value['count']);
-
-            }else {
-                
-                $warehouse->all_my_total_debt = 0;
-                $warehouse->all_sum_dollar =0;
-                $warehouse->all_discount_amount = 0;
-                $warehouse->count = $warehouse->count + $value['count'];
-                $warehouse->save(false);
-                $given_sum_dollars = $given_sum_dollars + (float)$value['price'] * (float)$value['count'];
-
-                $relativeHistory = new WarehouseHistory();
-                $relativeHistory->sklad_id = $sklad->id;
-                $relativeHistory->brand_id = $brand_list->id;
-                $relativeHistory->product_category_id = $product_category_list->id;
-                $relativeHistory->size = $value['size'];
-                $relativeHistory->count = $value['count'];
-                $relativeHistory->type = $sklad->getTypeNameView($value['tip']);
-                $relativeHistory->price = $value['price'];
-                $relativeHistory->cr_date = date('Y-m-d H:i:s');
-                $relativeHistory->save(false);
-                $error = $relativeHistory->errors;
-                // $sum_all_product = $sum_all_product + float($value['price']) * float($value['count']);
+                if (!$relativeHistory->save(false)) {
+                    throw new \RuntimeException('Import tarixi saqlanmadi.');
+                }
             }
-                
-        }
-        $sklad->given_sum_dollar = $given_sum_dollars;
-        $sklad->my_total_debt = $given_sum_dollars -  ($sum_dollars -  $discount_amounts);
-        $sklad->save(false);
 
-        $myTotalDebt = MyTotalDebt::find()->where(['consignor_id' => $consignor->id])->one();
-        if ($myTotalDebt) {
-            $myTotalDebt->total_debt = $my_total_debts + ($given_sum_dollars -  $sum_dollars - $discount_amounts);
+            $sklad->given_sum_dollar = $given_sum_dollars;
+            $sklad->my_total_debt = $given_sum_dollars - ((float)$sum_dollars - (float)$discount_amounts);
+
+            $myTotalDebt = MyTotalDebt::find()->where(['consignor_id' => $consignor->id])->one();
+            $oldDebt = $myTotalDebt ? (float)$myTotalDebt->total_debt : 0;
+            $sklad->old_my_total_debt = $oldDebt;
+            if (!$sklad->save(false)) {
+                throw new \RuntimeException('Import summasi saqlanmadi.');
+            }
+
+            if (!$myTotalDebt) {
+                $myTotalDebt = new MyTotalDebt();
+                $myTotalDebt->consignor_id = $consignor->id;
+            }
+            $myTotalDebt->total_debt = $oldDebt + $sklad->my_total_debt;
             $myTotalDebt->update_by = Yii::$app->user->identity->id;
             $myTotalDebt->cr_date = date('Y-m-d H:i:s');
-            $myTotalDebt->save(false);
-        }else{
-            $myTotalDebt = new MyTotalDebt();
-            $myTotalDebt->consignor_id = $consignor->id;
-            $myTotalDebt->total_debt = $my_total_debts + ($given_sum_dollars -  $sum_dollars - $discount_amounts);
-            $myTotalDebt->update_by = Yii::$app->user->identity->id;
-            $myTotalDebt->cr_date = date('Y-m-d H:i:s');
-            $myTotalDebt->save(false);
+            if (!$myTotalDebt->save(false)) {
+                throw new \RuntimeException('Qarz saqlanmadi.');
+            }
+
+            $transaction->commit();
+        } catch (\Throwable $e) {
+            $transaction->rollBack();
+            Yii::error($e->getMessage(), __METHOD__);
+            return $errorResponse('Importni saqlashda xatolik yuz berdi.');
         }
 
-        return $this->redirect(['/sklad/index']);
+        return $successResponse();
     }
 
     public function actionQarztul(){

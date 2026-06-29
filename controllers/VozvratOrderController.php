@@ -156,22 +156,276 @@ class VozvratOrderController extends Controller
     {    
         // $warehouse = Warehouse::find()->select(['brand_id'])->groupBy(['brand_id'])->orderBy(['product_category.sorting' => SORT_ASC])->all();
             
-        $warehouse = Warehouse::find()
-        ->alias('p')
-        ->select(["p.*", "pc.sorting"])
-        ->leftJoin("brands pc", "p.brand_id = pc.id")
-        ->where(['pc.sup_status' => 1])
-        ->orderBy(['pc.sorting' => SORT_ASC])
-        ->groupBy(['p.brand_id'])->all();
+        $warehouses = Warehouse::find()
+            ->alias('p')
+            ->with(['brand', 'productCategory'])
+            ->leftJoin("brands b", "p.brand_id = b.id")
+            ->leftJoin("product_category pc", "p.product_category_id = pc.id")
+            ->where(['b.sup_status' => 1])
+            ->orderBy(['b.sorting' => SORT_ASC, 'pc.sorting' => SORT_ASC])
+            ->all();
+
+        $warehouse = [];
+        $warehouseByBrand = [];
+        foreach ($warehouses as $item) {
+            if (!isset($warehouseByBrand[$item->brand_id])) {
+                $warehouseByBrand[$item->brand_id] = [];
+                $warehouse[] = $item;
+            }
+            $warehouseByBrand[$item->brand_id][] = $item;
+        }
         // echo "<pre>";
         // print_r($warehouse);
         // echo "<pre>";
         // $warehouses = Warehouse::find()->all();
-        return $this->render('vozvrat', ['warehouse' => $warehouse]);
+        return $this->render('vozvrat', [
+            'warehouse' => $warehouse,
+            'warehouseByBrand' => $warehouseByBrand,
+        ]);
     }
 
 
     public function actionAccept()
+    {
+        Yii::$app->response->format = Response::FORMAT_JSON;
+        $request = Yii::$app->request;
+
+        $clientId = (int)$request->post('customer_name');
+        $date = trim((string)$request->post('order_date'));
+        $allSummDollar = $this->toFloat($request->post('all_summ_dollar'));
+        $summDollar = $this->toFloat($request->post('summ_dollar'));
+        $sumSom = $this->toFloat($request->post('summa_som'));
+        $sumCart = $this->toFloat($request->post('summa_karta'));
+        $comment = trim((string)$request->post('comment'));
+        $tasdiqCheck = (int)$request->post('tasdiq_check') === 1 ? 1 : 0;
+        $contact = json_decode((string)$request->post('product_details'), true);
+
+        $transaction = Yii::$app->db->beginTransaction();
+        try {
+            if (!$clientId || !($client = Client::findOne($clientId))) {
+                throw new \RuntimeException('Mijoz topilmadi.');
+            }
+
+            $dateObject = \DateTime::createFromFormat('Y-m-d', $date);
+            if (!$dateObject || $dateObject->format('Y-m-d') !== $date) {
+                throw new \RuntimeException('Sana noto\'g\'ri kiritilgan.');
+            }
+
+            if (!is_array($contact) || empty($contact)) {
+                throw new \RuntimeException('Vozvrat uchun mahsulot tanlanmagan.');
+            }
+
+            if ($allSummDollar < 0 || $summDollar < 0 || $sumSom < 0 || $sumCart < 0) {
+                throw new \RuntimeException('Qaytarilgan summalar manfiy bo\'lishi mumkin emas.');
+            }
+
+            $exchangeRate = ExchangeRate::findOne(1);
+            if (!$exchangeRate || (float)$exchangeRate->dollar <= 0) {
+                throw new \RuntimeException('Dollar kursi topilmadi.');
+            }
+            $exchangeRates = (float)$exchangeRate->dollar;
+
+            $orderAccount = OrderAccount::find()->where(['client_id' => $client->id])->one();
+            if ($orderAccount === null) {
+                $orderAccount = new OrderAccount();
+                $orderAccount->client_id = $client->id;
+                $orderAccount->last_order_date = $date;
+                $orderAccount->total_debt = 0;
+                $orderAccount->date = $date;
+                $orderAccount->exchange_rate = $exchangeRates;
+                $orderAccount->cr_date_time = date('Y-m-d H:i:s', strtotime($date . ' ' . date('H:i:s')));
+                if (!$orderAccount->save(false)) {
+                    throw new \RuntimeException('Mijoz qarz hisobi saqlanmadi.');
+                }
+            }
+
+            $oldTotalDebt = (float)$orderAccount->total_debt;
+            $normalizedRows = [];
+            $totalProductSum = 0;
+            $hasLargePrice = false;
+            $typeView = new VozvratOrder();
+
+            foreach ($contact as $index => $value) {
+                if (!is_array($value)) {
+                    throw new \RuntimeException(($index + 1) . "-qatordagi mahsulot noto'g'ri.");
+                }
+
+                $warehouseId = (int)(isset($value['product_id']) ? $value['product_id'] : 0);
+                $brandId = (int)(isset($value['brand_id']) ? $value['brand_id'] : 0);
+                $categoryId = (int)(isset($value['product_category_id']) ? $value['product_category_id'] : 0);
+                $typeId = (int)$typeView->getTypeNameView(isset($value['tip']) ? $value['tip'] : '');
+                $size = $this->toFloat(isset($value['size']) ? $value['size'] : 0);
+                $price = $this->toFloat(isset($value['price']) ? $value['price'] : 0);
+                $count = (int)(isset($value['count']) ? $value['count'] : 0);
+
+                $brand = Brands::find()->where(['id' => $brandId, 'sup_status' => 1])->one();
+                $category = ProductCategory::find()->where([
+                    'id' => $categoryId,
+                    'brand_id' => $brandId,
+                    'sup_status' => 1,
+                ])->one();
+                $typeSklad = TypeSklad::find()->where(['name' => isset($value['joy']) ? $value['joy'] : ''])->one();
+                $warehouse = Warehouse::findOne($warehouseId);
+
+                if (!$brand || !$category || !$typeSklad || !$warehouse || !$typeId) {
+                    throw new \RuntimeException(($index + 1) . "-qatorda mahsulot ma'lumotlari topilmadi.");
+                }
+                if ((int)$warehouse->brand_id !== $brandId || (int)$warehouse->product_category_id !== $categoryId || (int)$warehouse->type !== $typeId || (float)$warehouse->size !== $size) {
+                    throw new \RuntimeException(($index + 1) . "-qatorda mahsulot ombor ma'lumotiga mos emas.");
+                }
+                if ($count <= 0) {
+                    throw new \RuntimeException(($index + 1) . "-qatorda soni 0 dan katta bo'lishi kerak.");
+                }
+                if ($price < 0) {
+                    throw new \RuntimeException(($index + 1) . "-qatorda narx manfiy bo'lishi mumkin emas.");
+                }
+
+                $realPrice = 0;
+                $realPriceModel = Prices::find()->where(['warehouse_id' => $warehouse->id])->one();
+                if ($realPriceModel) {
+                    $realPrice = (float)$realPriceModel->price;
+                }
+
+                $lineHasLargePrice = $realPrice > 0 && $price < $realPrice;
+                if ($lineHasLargePrice) {
+                    $hasLargePrice = true;
+                }
+
+                $lineAmount = $price * $count;
+                $lineProfit = $realPrice > 0 ? ($price - $realPrice) * $count : 0;
+                $totalProductSum += $lineAmount;
+
+                $normalizedRows[] = [
+                    'warehouse' => $warehouse,
+                    'brand_id' => $brandId,
+                    'product_category_id' => $categoryId,
+                    'type_sklad_id' => (int)$typeSklad->id,
+                    'type' => $typeId,
+                    'size' => $size,
+                    'count' => $count,
+                    'price' => $price,
+                    'real_price' => $realPrice,
+                    'profit' => round($lineProfit, 2),
+                    'is_debtor' => $lineHasLargePrice ? 1 : 0,
+                ];
+            }
+
+            $totalProductSum = round($totalProductSum, 2);
+            if ($allSummDollar > $totalProductSum) {
+                throw new \RuntimeException('Jami qaytarilgan summa mahsulot umumiy narxidan katta bo\'lishi mumkin emas.');
+            }
+
+            $vozvratOrder = new VozvratOrder();
+            $vozvratOrder->client_id = $client->id;
+            $vozvratOrder->date = $date;
+            $vozvratOrder->exchange_rate = $exchangeRates;
+            $vozvratOrder->product_summ_dollar = $totalProductSum;
+            $vozvratOrder->all_summ_dollar = $allSummDollar;
+            $vozvratOrder->old_total_debt = $oldTotalDebt;
+            $vozvratOrder->sum_dollar = $summDollar;
+            $vozvratOrder->sum_som = $sumSom;
+            $vozvratOrder->sum_cart = $sumCart;
+            $vozvratOrder->confirmation = $tasdiqCheck;
+            $vozvratOrder->comment = $comment;
+            $vozvratOrder->large_price = $hasLargePrice ? 1 : 0;
+            $vozvratOrder->cr_date_time = date('Y-m-d H:i:s', strtotime($date . ' ' . date('H:i:s')));
+            if (!$vozvratOrder->save(false)) {
+                throw new \RuntimeException('Vozvrat buyurtma saqlanmadi.');
+            }
+
+            foreach ($normalizedRows as $row) {
+                $productAccount = ProductAccount::find()
+                    ->andWhere(['vozvrat_order_id' => $vozvratOrder->id])
+                    ->andWhere(['brand_id' => $row['brand_id']])
+                    ->andWhere(['product_category_id' => $row['product_category_id']])
+                    ->andWhere(['type' => $row['type']])
+                    ->andWhere(['type_sklad_id' => $row['type_sklad_id']])
+                    ->andWhere(['size' => $row['size']])
+                    ->one();
+
+                if (!$productAccount) {
+                    $productAccount = new ProductAccount();
+                    $productAccount->order_account_id = $orderAccount->id;
+                    $productAccount->vozvrat_order_id = $vozvratOrder->id;
+                    $productAccount->brand_id = $row['brand_id'];
+                    $productAccount->product_category_id = $row['product_category_id'];
+                    $productAccount->size = $row['size'];
+                    $productAccount->count = 0;
+                    $productAccount->type = $row['type'];
+                    $productAccount->type_sklad_id = $row['type_sklad_id'];
+                    $productAccount->cr_date = $date;
+                }
+                $productAccount->count = (int)$productAccount->count + $row['count'];
+                $productAccount->price = $row['price'];
+                $productAccount->real_price = $row['real_price'];
+                $productAccount->profit = round((float)$productAccount->profit + $row['profit'], 2);
+                $productAccount->is_debtor = $row['is_debtor'];
+                $productAccount->warehouse_id = $row['warehouse']->id;
+                if (!$productAccount->save(false)) {
+                    throw new \RuntimeException('Vozvrat mahsulot saqlanmadi.');
+                }
+
+                $relativeHistory = new ProductAccountHistory();
+                $relativeHistory->order_account_id = $orderAccount->id;
+                $relativeHistory->vozvrat_order_id = $vozvratOrder->id;
+                $relativeHistory->brand_id = $row['brand_id'];
+                $relativeHistory->product_category_id = $row['product_category_id'];
+                $relativeHistory->size = $row['size'];
+                $relativeHistory->count = $row['count'];
+                $relativeHistory->given_count = $row['count'];
+                $relativeHistory->type = $row['type'];
+                $relativeHistory->price = $row['price'];
+                $relativeHistory->real_price = $row['real_price'];
+                $relativeHistory->is_debtor = $row['is_debtor'];
+                $relativeHistory->type_sklad_id = $row['type_sklad_id'];
+                $relativeHistory->profit = $row['profit'];
+                $relativeHistory->cr_date = $date;
+                $relativeHistory->warehouse_id = $row['warehouse']->id;
+                if (!$relativeHistory->save(false)) {
+                    throw new \RuntimeException('Vozvrat mahsulot tarixi saqlanmadi.');
+                }
+
+                if ($row['type_sklad_id'] === 1) {
+                    $row['warehouse']->count = (int)$row['warehouse']->count + $row['count'];
+                    if (!$row['warehouse']->save(false)) {
+                        throw new \RuntimeException('Ombor qoldig\'i yangilanmadi.');
+                    }
+                }
+            }
+
+            if ($tasdiqCheck === 1) {
+                $returnedProductDebtPart = $totalProductSum - $allSummDollar;
+                $newTotalDebt = round($oldTotalDebt - $returnedProductDebtPart, 2);
+
+                $orderAccount->total_debt_old = $oldTotalDebt;
+                $orderAccount->total_debt = $newTotalDebt;
+                $orderAccount->last_order_date = $date;
+                if (!$orderAccount->save(false)) {
+                    throw new \RuntimeException('Mijoz qarzi yangilanmadi.');
+                }
+
+                $vozvratOrder->total_debt = $newTotalDebt;
+                if (!$vozvratOrder->save(false)) {
+                    throw new \RuntimeException('Vozvrat qarz holati saqlanmadi.');
+                }
+            }
+
+            $transaction->commit();
+            return [
+                'success' => true,
+                'redirect' => Yii::$app->urlManager->createUrl(['/vozvrat-order/index']),
+            ];
+        } catch (\Throwable $e) {
+            $transaction->rollBack();
+            Yii::$app->response->statusCode = 400;
+            return [
+                'success' => false,
+                'message' => $e->getMessage(),
+            ];
+        }
+    }
+
+    private function actionAcceptOld()
     {
         // Requestni chop etish
         
@@ -732,6 +986,15 @@ class VozvratOrderController extends Controller
             return $this->redirect(['index']);
         }
        
+    }
+
+    private function toFloat($value)
+    {
+        if (is_string($value)) {
+            $value = str_replace(' ', '', str_replace(',', '.', trim($value)));
+        }
+
+        return is_numeric($value) ? (float)$value : 0;
     }
 
     /**

@@ -12,6 +12,7 @@ use yii\helpers\Html;
         'client_total_debt' => $client_total_debt,
         'order_account_status_old' =>$order_account_status_old,
         'type' => $type,
+        'stockError' => isset($stockError) ? $stockError : null,
     ]) ?>
 
 </div>

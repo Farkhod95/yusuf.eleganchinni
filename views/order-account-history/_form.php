@@ -92,6 +92,7 @@ $brandList    = Brands::listActive();
 $urlCats      = Url::to(['order-account-history/categories-by-brand']);
 $urlSizesOnly = Url::to(['order-account-history/sizes-types-by-category']); // brand+category -> sizes (+ maybe types)
 $urlTypesBySz = Url::to(['order-account-history/types-by-size']);           // brand+category+size -> types
+$urlAvailable = Url::to(['order-account-history/available-count']);
 ?>
 <div class="panel panel-inverse user-index">
   <div class="panel-heading">
@@ -395,6 +396,7 @@ $this->registerCss("
 .select2-selection.is-invalid { border-color:#dc3545 !important; }
 .is-invalid { border-color:#dc3545 !important; }
 .mi-row-error{ color:#dc3545; font-size:12px; margin-top:4px; }
+.mi-stock-info{ color:#398787; font-size:12px; margin-top:4px; }
 ");
 
 // JS ga URL larni beramiz
@@ -403,7 +405,8 @@ $this->registerJs(
     'cats'  => $urlCats,
     'sizes' => $urlSizesOnly,
     'types' => $urlTypesBySz,
-  ]).';',
+    'available' => $urlAvailable,
+  ]).'; window.__OA_ORDER_ID__ = '.(int)$model->id.'; window.__OA_STOCK_ERROR__ = '.Json::htmlEncode(isset($stockError) ? $stockError : null).';',
   View::POS_END
 );
 
@@ -480,6 +483,129 @@ function clearSelect2Invalid($sel){
 var urlCats  = window.__OA_URLS__.cats;
 var urlSizes = window.__OA_URLS__.sizes;
 var urlTypes = window.__OA_URLS__.types;
+var urlAvailable = window.__OA_URLS__.available;
+var orderHistoryId = window.__OA_ORDER_ID__;
+var stockCache = {};
+var stockRequests = {};
+
+function rowStockKey($row) {
+  var brandId = $row.find('select.mi-brand').val();
+  var categoryId = $row.find('select.mi-category').val();
+  var sizeVal = $row.find('select.mi-size').val();
+  var typeId = $row.find('select.mi-type').val();
+  if (!brandId || !categoryId || !sizeVal || !typeId) return '';
+  return [brandId, categoryId, String(sizeVal).replace(',', '.'), typeId].join(':');
+}
+
+function getRowsByStockKey(key) {
+  var rows = [];
+  $('#my_id').find('tr.multiple-input-list__item').each(function(){
+    var $row = $(this);
+    if (rowStockKey($row) === key) {
+      rows.push($row);
+    }
+  });
+  return rows;
+}
+
+function requestedCountByStockKey(key) {
+  var total = 0;
+  getRowsByStockKey(key).forEach(function($row){
+    var count = parseInt(($row.find('input.mi-count').val() || '0').toString().replace(',', '.'), 10);
+    if (!isNaN(count) && count > 0) total += count;
+  });
+  return total;
+}
+
+function clearStockCountMessages(key) {
+  getRowsByStockKey(key).forEach(function($row){
+    var $cnt = $row.find('input.mi-count');
+    $cnt.removeClass('is-invalid');
+    $cnt.next('.mi-row-error.stock-error').remove();
+    $cnt.next('.mi-stock-info').remove();
+  });
+}
+
+function showCountMessage($input, message, isError) {
+  $input.next('.mi-row-error.stock-error').remove();
+  $input.next('.mi-stock-info').remove();
+  if (isError) {
+    $input.addClass('is-invalid');
+    $input.after('<div class="mi-row-error stock-error">' + message + '</div>');
+  } else {
+    $input.removeClass('is-invalid');
+    $input.after('<div class="mi-stock-info">' + message + '</div>');
+  }
+}
+
+function fetchAvailableForKey(key) {
+  if (!key) return $.Deferred().resolve(null).promise();
+  if (stockCache[key]) return $.Deferred().resolve(stockCache[key]).promise();
+  if (stockRequests[key]) return stockRequests[key];
+
+  var parts = key.split(':');
+  stockRequests[key] = $.getJSON(urlAvailable, {
+    order_id: orderHistoryId,
+    brand_id: parts[0],
+    category_id: parts[1],
+    size: parts[2],
+    type: parts[3]
+  }).then(function(res){
+    stockCache[key] = res || {ok:false, available:0};
+    delete stockRequests[key];
+    return stockCache[key];
+  }, function(){
+    delete stockRequests[key];
+    return {ok:false, available:0};
+  });
+
+  return stockRequests[key];
+}
+
+function validateStockKey(key) {
+  if (!key) return $.Deferred().resolve(false).promise();
+  return fetchAvailableForKey(key).then(function(res){
+    clearStockCountMessages(key);
+    if (!res || !res.ok) return false;
+
+    var requested = requestedCountByStockKey(key);
+    var available = parseInt(res.available || 0, 10);
+    var hasError = requested > available;
+    var rows = getRowsByStockKey(key);
+    rows.forEach(function($row){
+      var $cnt = $row.find('input.mi-count');
+      if (hasError) {
+        showCountMessage($cnt, 'Bu mahsulotdan ' + available + ' ta qolgan. Siz ' + requested + ' ta kiritdingiz.', true);
+      } else if (requested > 0) {
+        showCountMessage($cnt, 'Qoldiq: ' + available + ' ta', false);
+      }
+    });
+    return hasError;
+  });
+}
+
+function validateAllStockCounts() {
+  var keys = {};
+  $('#my_id').find('tr.multiple-input-list__item').each(function(){
+    var key = rowStockKey($(this));
+    if (key) keys[key] = true;
+  });
+
+  var requests = Object.keys(keys).map(function(key){
+    return validateStockKey(key);
+  });
+
+  if (!requests.length) return $.Deferred().resolve(false).promise();
+  return $.when.apply($, requests).then(function(){
+    var args = Array.prototype.slice.call(arguments);
+    return args.some(function(hasError){ return hasError === true; });
+  });
+}
+
+function validateRowStock($row) {
+  var key = rowStockKey($row);
+  if (key) validateStockKey(key);
+}
 
 // --------------- BRAND -> CATEGORY -----------------
 function fetchCategories($row, brandId, selectedCatId){
@@ -556,6 +682,8 @@ $(document).on('change','select.mi-brand',function(){
 
   fetchCategories($r,$(this).val(),null);
   clearSelect2Invalid($(this));
+  stockCache = {};
+  setTimeout(function(){ validateAllStockCounts(); }, 200);
 });
 
 // 🔴 Kategoriya o'zgarganda: size va type tozalanadi + yangi size list yuklanadi
@@ -569,6 +697,8 @@ $(document).on('change','select.mi-category',function(){
 
   fetchSizesOnly($r,$r.find('select.mi-brand').val(),$(this).val(),null);
   clearSelect2Invalid($(this));
+  stockCache = {};
+  setTimeout(function(){ validateAllStockCounts(); }, 200);
 });
 
 // 🔴 Size o'zgarganda: type tozalanadi + yangi type list yuklanadi
@@ -583,14 +713,21 @@ $(document).on('change','select.mi-size',function(){
 
   fetchTypesBySize($r, brandId, catId, sizeVal, null);
   clearSelect2Invalid($(this));
+  stockCache = {};
+  setTimeout(function(){ validateAllStockCounts(); }, 200);
 });
 
 $(document).on('change','select.mi-type',function(){
   clearSelect2Invalid($(this));
+  stockCache = {};
+  validateRowStock($(this).closest('tr'));
 });
 
 $(document).on('input','.mi-count,.mi-price',function(){
   clearInputInvalid($(this));
+  if ($(this).hasClass('mi-count')) {
+    validateRowStock($(this).closest('tr'));
+  }
 });
 
 // --- CATEGORY UCHUN QALAMCHA EDIT TUGMASI ---
@@ -626,8 +763,19 @@ function initCategoryEditButtons(context){
 
 // --- Submit: barcha custom tekshiruvlar ---
 $('#order-form').on('submit', function(e){
+  var $form = $(this);
+  if ($form.data('stock-validating')) {
+    e.preventDefault();
+    return false;
+  }
+  if ($form.data('stock-ok')) {
+    $form.removeData('stock-ok');
+    return true;
+  }
+
   let hasError=false;
   $('.mi-row-error').remove();
+  $('.mi-stock-info').remove();
   $('.select2-selection').removeClass('is-invalid');
 
   ['#all-sum-dollar','#sum-dollar','#sum-som','#sum-cart','#id-comment','#qaytim-som','#qaytim-dollar'].forEach(function(id){
@@ -670,6 +818,21 @@ $('#order-form').on('submit', function(e){
     }
     return;
   }
+
+  e.preventDefault();
+  $form.data('stock-validating', true);
+  validateAllStockCounts().then(function(hasStockError){
+    $form.removeData('stock-validating');
+    if (hasStockError) {
+      var $first = $('.stock-error').first();
+      if ($first.length) {
+        $('html,body').animate({scrollTop:$first.offset().top-150},250);
+      }
+      return;
+    }
+    $form.data('stock-ok', true);
+    $form.trigger('submit');
+  });
 });
 
 // --- Yangi qator qo'shilganda bo'sh qilib qo'yamiz ---
@@ -681,6 +844,7 @@ $(document).on('afterAddRow','#my_id',function(e,row){
 
   setTimeout(function(){
     initCategoryEditButtons($r);
+    validateAllStockCounts();
   }, 0);
 });
 
@@ -726,6 +890,14 @@ $(document).ready(function () {
 
   initCategoryEditButtons(); // qalamcha tugmalari
   recalcTotalSum();          // jami summa
+  if (window.__OA_STOCK_ERROR__) {
+    var $firstCount = $('#my_id').find('tr.multiple-input-list__item input.mi-count').first();
+    if ($firstCount.length) {
+      showCountMessage($firstCount, window.__OA_STOCK_ERROR__, true);
+    }
+  } else {
+    setTimeout(function(){ validateAllStockCounts(); }, 500);
+  }
 });
 
 // Narx yoki son o'zgarsa – hammasini qayta hisoblaymiz
@@ -735,7 +907,10 @@ $(document).on('input change', '.mi-price, .mi-count', function () {
 
 // Qator o'chirilganda ham qayta hisoblaymiz
 $(document).on('click', '.js-input-remove', function () {
-  setTimeout(recalcTotalSum, 0);
+  setTimeout(function(){
+    recalcTotalSum();
+    validateAllStockCounts();
+  }, 0);
 });
 JS
 , View::POS_END);

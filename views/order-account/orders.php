@@ -27,6 +27,9 @@ $exchangeRate = ExchangeRate::find()->where(['id' => 1])->one();
 /** Brand id=>name xaritasi JS ga chiqsin */
 $this->registerJsVar('BRAND_MAP', ArrayHelper::map($brands, 'id', 'name'));
 $this->registerJsVar('CLIENT_CREATE_ONE_URL', Url::to(['/client/create-one']));
+$this->registerJsVar('CART_DRAFT_LOAD_URL', Url::to(['order-account/cartdraftload']));
+$this->registerJsVar('CART_DRAFT_SAVE_URL', Url::to(['order-account/cartdraftsave']));
+$this->registerJsVar('CART_DRAFT_CLEAR_URL', Url::to(['order-account/cartdraftclear']));
 
 $catAjaxUrl = Url::to(['product-category/by-brand']); // AJAX endpoint (absolyut/relative muhim emas)
 $isRole1 = !Yii::$app->user->isGuest && (int)Yii::$app->user->identity->permission === 1;
@@ -180,16 +183,7 @@ input:checked + .slider:before {
                   </tr>
 
                   <?php
-                  $warehouses = Warehouse::find()
-                    ->alias('p')
-                    ->select(["p.*", "pc.sorting"])
-                    ->leftJoin("product_category pc", "p.product_category_id = pc.id")
-                    ->leftJoin("brands b", "p.brand_id = b.id")
-                    ->andWhere(['b.sup_status' => 1])
-                    ->andWhere(['p.brand_id' => $model->brand->id])
-                    ->orderBy(['pc.sorting' => SORT_ASC])
-                    ->all();
-
+                  $warehouses = isset($warehouseByBrand[$model->brand_id]) ? $warehouseByBrand[$model->brand_id] : [];
                   foreach ($warehouses as $model1) {
                   ?>
                     <tr class="handle"
@@ -597,6 +591,200 @@ function adjustTableClass() {
 window.onload = adjustTableClass;
 window.onresize = adjustTableClass;
 
+function getSelectedCartClient() {
+  return $('select[name="customer_name"]').val();
+}
+
+function roundCartSum(value) {
+  return Math.round((parseFloat(value || '0') + Number.EPSILON) * 100) / 100;
+}
+
+function collectBasketDetails() {
+  var productDetails = [];
+  $("#backet").children().each(function(){
+    if($(this).attr("id") !== "add"){
+      var productId = $(this).children().eq(9).text();
+      productDetails.push({
+        joy: $(this).children().eq(1).text(),
+        marka: $(this).children().eq(2).text(),
+        name: $(this).children().eq(3).text(),
+        size: $(this).children().eq(4).text(),
+        tip: $(this).children().eq(5).text(),
+        price: $(this).children().eq(6).text(),
+        count: $(this).children().eq(7).text(),
+        all_sum: $(this).children().eq(8).text(),
+        product_id: productId,
+        brand_id: $(this).children().eq(10).text(),
+        product_category_id: $(this).children().eq(11).text(),
+        key: $(this).children().eq(12).text() || ('warehouse_' + productId),
+        amount_row: $(this).children().eq(13).text()
+      });
+    }
+  });
+  return productDetails;
+}
+
+function updateWarehouseCountByKey(key, diff) {
+  if (!key || !diff) return;
+  var row = document.getElementById(key);
+  if (!row) return;
+
+  var $countCell = $(row).children().eq(4);
+  var current = parseInt($countCell.text() || '0', 10);
+  if (isNaN(current)) current = 0;
+  $countCell.html('<b>' + (current + diff) + '</b>');
+}
+
+function updateAmountRowByClass(amountRow, diff) {
+  if (!amountRow || !diff) return;
+  var $cell = $("." + amountRow).children().eq(2);
+  if (!$cell.length) return;
+
+  var current = parseInt($cell.text() || '0', 10);
+  if (isNaN(current)) current = 0;
+  $cell.text(current + diff);
+}
+
+function applyBasketReservation(item, direction) {
+  var count = parseInt(item.count || '0', 10);
+  if (!count) return;
+  updateWarehouseCountByKey(item.key || ('warehouse_' + item.product_id), direction * count);
+  updateAmountRowByClass(item.amount_row, direction * count);
+}
+
+function restoreBasketReservations() {
+  collectBasketDetails().forEach(function(item) {
+    applyBasketReservation(item, 1);
+  });
+}
+
+function appendBasketRow(item) {
+  var lineSum = item.all_sum;
+  if (lineSum === undefined || lineSum === null || lineSum === '') {
+    lineSum = roundCartSum(parseFloat(item.price || '0') * parseInt(item.count || '0', 10));
+  }
+
+  var $row = $("<tr>");
+  var appendCell = function(text, bold, hiddenClass, hidden) {
+    var $td = $("<td>").css("background-color", "#efdfdf");
+    if (hidden || hiddenClass) {
+      $td.css("display", "none");
+    }
+    if (hiddenClass) {
+      $td.addClass(hiddenClass);
+    }
+    if (bold) {
+      $td.append($("<b>").text(text));
+    } else {
+      $td.text(text);
+    }
+    $row.append($td);
+  };
+
+  appendCell("", true);
+  appendCell(item.joy || "", false);
+  appendCell(item.marka || "", true);
+  appendCell(item.name || "", false);
+  appendCell(item.size || "", true);
+  appendCell(item.tip || "", false);
+  appendCell(item.price || "", true);
+  appendCell(item.count || "", false);
+  appendCell(lineSum, true);
+  appendCell(item.product_id || "", false, "", true);
+  appendCell(item.brand_id || "", false, "brand-id", true);
+  appendCell(item.product_category_id || "", false, "category-id", true);
+  appendCell(item.key || ('warehouse_' + (item.product_id || '')), false, "warehouse-key", true);
+  appendCell(item.amount_row || "", false, "amount-row", true);
+
+  $("<td>")
+    .css("background-color", "#efdfdf")
+    .append($("<button>").addClass("btn btn-sm btn-danger delete-product").append($("<i>").addClass("glyphicon glyphicon-remove")))
+    .appendTo($row);
+
+  $("#add").before($row);
+}
+
+function recalculateBasketTotals() {
+  var rowCount = 0;
+  var totalCount = 0;
+  var totalSum = 0;
+
+  $("#backet").children().each(function(){
+    if($(this).attr("id") !== "add"){
+      rowCount++;
+      var $indexCell = $(this).children().eq(0);
+      if ($indexCell.find("b").length) {
+        $indexCell.find("b").text(rowCount);
+      } else {
+        $indexCell.html($("<b>").text(rowCount));
+      }
+      var price = parseFloat($(this).children().eq(6).text() || '0');
+      var count = parseInt($(this).children().eq(7).text() || '0', 10);
+      var lineSum = roundCartSum(price * count);
+      $(this).children().eq(8).find("b").text(lineSum);
+      totalCount += count;
+      totalSum += lineSum;
+    }
+  });
+
+  totalSum = roundCartSum(totalSum);
+  $("#backet").attr("data-increment", rowCount);
+  $("#backet").attr("data-count", totalCount);
+  $("#backet").attr("data-count-sum", totalSum);
+  $("#all").text(totalCount);
+  $("#all_sum").text(totalSum);
+}
+
+function resetBasket() {
+  restoreBasketReservations();
+  $("#backet").children().each(function(){
+    if($(this).attr("id") !== "add"){
+      $(this).remove();
+    }
+  });
+  recalculateBasketTotals();
+}
+
+function saveCartDraft() {
+  var clientId = getSelectedCartClient();
+  if (!clientId) return;
+
+  $.ajax({
+    url: CART_DRAFT_SAVE_URL,
+    method: "POST",
+    dataType: "json",
+    data: {
+      client_id: clientId,
+      product_details: JSON.stringify(collectBasketDetails()),
+      total_count: $("#backet").attr("data-count"),
+      total_sum: $("#backet").attr("data-count-sum")
+    }
+  }).fail(function(jqXHR, textStatus, errorThrown) {
+    console.error("Cart draft save failed: " + textStatus + ", " + errorThrown);
+  });
+}
+
+function loadCartDraft(clientId) {
+  resetBasket();
+  if (!clientId) return;
+
+  $.ajax({
+    url: CART_DRAFT_LOAD_URL,
+    method: "GET",
+    dataType: "json",
+    data: { client_id: clientId }
+  }).done(function(data) {
+    if (!data || !data.success || !Array.isArray(data.items)) return;
+    data.items.forEach(function(item) {
+      appendBasketRow(item);
+      applyBasketReservation(item, -1);
+    });
+    recalculateBasketTotals();
+  }).fail(function(jqXHR, textStatus, errorThrown) {
+    console.error("Cart draft load failed: " + textStatus + ", " + errorThrown);
+  });
+}
+
 $("#myselect").change(function () {
   var clientId = $(this).val();
   if (clientId) {
@@ -625,6 +813,8 @@ $("select#myselect").change(function(){
 
   var payButton = document.getElementById('payButton');
   if (payButton) payButton.disabled = !this.value;
+
+  loadCartDraft(this.value);
 });
 
 function loadMoreContent() {
@@ -683,6 +873,7 @@ $("#qarztul").submit(function(event){
 
   var payButton = document.getElementById('payButton');
   $form.data('submitting', true);
+  $(".error_tul_qarz_sum_dollar, .error_tul_qarz_sum_transfer, .error_tul_qarz_sum_som, .error_tul_qarz_summ_cart, .error_tul_qarz_zdacha_dollar, .error_tul_qarz_zdacha_sum").text("");
   if (payButton){ payButton.disabled = true; payButton.innerHTML = 'Jarayonda…'; }
 
   let action = $form.attr("action");
@@ -733,9 +924,17 @@ $("#qarztul").submit(function(event){
 
   $.ajax({ url: action, data: payload, method: "POST" })
     .done(function(data, textStatus, jqXHR) {
+      if (data && data.success && data.redirect) {
+        window.location.href = data.redirect;
+        return;
+      }
       window.location.href = jqXHR.responseURL || '/debt-repayment/index';
     })
     .fail(function(jqXHR, textStatus, errorThrown) {
+      var message = (jqXHR.responseJSON && jqXHR.responseJSON.message) ? jqXHR.responseJSON.message : "Qarzni to'lashda xatolik yuz berdi.";
+      $(".error_tul_qarz_sum_dollar").text(message);
+      $form.data('submitting', false);
+      if (payButton){ payButton.disabled = false; payButton.innerHTML = "Qarzni to'lash"; }
       console.error("Request failed: " + textStatus + ", " + errorThrown);
     });
 });
@@ -746,6 +945,8 @@ $("#buy").submit(function(event){
   if ($form.data('submitting')) {
     return false;
   }
+
+  $(".error_summa_dollor, .error_summa_transfer, .error_summa_som, .error_summa_karta, .error_zdacha_dollar, .error_zdacha_sum").text("");
 
   let action = $form.attr("action");
 
@@ -806,8 +1007,16 @@ $("#buy").submit(function(event){
       $("#sellSubmitButton").prop("disabled", true).html('<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Jarayonda...');
     }
   }).done(function(data, textStatus, jqXHR) {
+    if (data && data.success && data.redirect) {
+      window.location.href = data.redirect;
+      return;
+    }
     window.location.href = jqXHR.responseURL || '/order-account-history/index';
   }).fail(function(jqXHR, textStatus, errorThrown) {
+    var message = (jqXHR.responseJSON && jqXHR.responseJSON.message) ? jqXHR.responseJSON.message : "Buyurtmani saqlashda xatolik yuz berdi.";
+    $(".error_summa_dollor").text(message);
+    $("#sellSubmitButton").prop("disabled", false).html("Sotishni tasdiqlash");
+    $form.data('submitting', false);
     console.error("Request failed: " + textStatus + ", " + errorThrown);
   });
 });
@@ -818,6 +1027,9 @@ $('#tasdiqCheckbox').on('change', function() {
 });
 
 $(".buy_product").on('click', function(){
+  $(".error_summa_dollor, .error_summa_transfer, .error_summa_som, .error_summa_karta, .error_zdacha_dollar, .error_zdacha_sum").text("");
+  $("#sellSubmitButton").prop("disabled", false).html("Sotishni tasdiqlash");
+
   let all_total = $("#backet").attr("data-count");
   let all_total_sum = $("#backet").attr("data-count-sum");
   let products_count = $("#backet").attr("data-increment");
@@ -842,11 +1054,15 @@ $(".buy_product").on('click', function(){
     }
   });
   console.log("product_details:", product_details);
+  product_details = collectBasketDetails();
   
   $('input[name="product_details"]').val(JSON.stringify(product_details));
   $('#count_porduct').text(products_count);
   $("#total_product").text(all_total);
   $("#total_product_sum").text(all_total_sum);
+  if (!$('input[name="chegirma_summa"]').val()) {
+    $('input[name="chegirma_summa"]').val(0);
+  }
 
   if(all_total == 0){
     $("#modal-dialog-error").modal("toggle");
@@ -933,6 +1149,7 @@ $(".submit").on("click", function(event){
     return false;
   }
   count_old = count_old - count_product;
+  updateWarehouseCountByKey(key, -count_product);
 
   var amountRow = $('input[name="amount_row"]').val();
   var aVal = $("." + amountRow).children().eq(2).text();
@@ -957,6 +1174,8 @@ $(".submit").on("click", function(event){
     "<td style='display:none;'>" + product_id + "</td>" +
     "<td style='display:none;' class='brand-id'>" + brand_id + "</td>" +
     "<td style='display:none;' class='category-id'>" + product_category_id + "</td>" +
+    "<td style='display:none;' class='warehouse-key'>" + key + "</td>" +
+    "<td style='display:none;' class='amount-row'>" + amountRow + "</td>" +
     "<td style='background-color:#efdfdf;'><button class='btn btn-sm btn-danger delete-product'><i class='glyphicon glyphicon-remove'></i></button></td>" +
     "</tr>"
   );
@@ -968,12 +1187,15 @@ $(".submit").on("click", function(event){
   $("#all").text(countAll);
   $("#all_sum").text(all_sum);
 
+  saveCartDraft();
   $("#modal-dialog2").modal('toggle');
 });
 
 $(document).on("click", ".delete-product", function() {
   let row = $(this).closest("tr");
   let decrementCount = parseInt(row.find("td:eq(7)").text() || '0', 10);
+  let warehouseKey = row.find("td:eq(12)").text() || ('warehouse_' + row.find("td:eq(9)").text());
+  let amountRow = row.find("td:eq(13)").text();
   let increment = parseInt($("#backet").attr("data-increment") || '0', 10);
 
   let currentCount = parseInt($("#backet").attr("data-count") || '0', 10);
@@ -987,6 +1209,8 @@ $(document).on("click", ".delete-product", function() {
   $("#all").text(currentCount);
   $("#all_sum").text(currentSum);
 
+  updateWarehouseCountByKey(warehouseKey, decrementCount);
+  updateAmountRowByClass(amountRow, decrementCount);
   row.remove();
   increment--;
   $("#backet").attr("data-increment", increment);
@@ -999,6 +1223,7 @@ $(document).on("click", ".delete-product", function() {
       i++;
     }
   });
+  saveCartDraft();
 });
 
 document.getElementById('toggleSwitch')?.addEventListener('change', function() {
@@ -1071,17 +1296,17 @@ function bcLoadCategories(brandId){
 function bcApplyFilter(){
   var brandId   = $('#brandFilter').val();
   var brandName = brandId ? (window.BRAND_MAP ? (BRAND_MAP[brandId] || '') : '') : '';
-  var catText   = ($('#categoryFilter option:selected').text() || '').toLowerCase();
+  var catId     = $('#categoryFilter').val();
 
   // .handle qatorlari
   $('#showRes .handle').each(function(){
     var $r       = $(this);
     var rowBrand = ($r.children().eq(1).text() || '').trim();           // Model ustuni
-    var rowCat   = ($r.attr('data-name') || '').toLowerCase();          // data-name = kategoriya nomi (lower)
+    var rowCatId = String($r.attr('data-category-id') || '');
     var visible  = true;
 
     if (brandName && rowBrand !== brandName) visible = false;
-    if (catText   && rowCat   !== catText)   visible = false;
+    if (catId && rowCatId !== String(catId)) visible = false;
 
     $r.toggle(visible);
   });

@@ -11,6 +11,7 @@ use kartik\select2\Select2;
 use kartik\date\DatePicker;
 use app\models\Client;
 use app\models\DebtRepayment;
+use app\models\OrderAccountCartDraft;
 
 /* @var $this yii\web\View */
 /* @var $searchModel app\models\OrderAccountHistorySearch */
@@ -37,6 +38,11 @@ if (!empty($searchModel->client_id)) {
         ->select('fio')
         ->where(['id' => (int)$searchModel->client_id])
         ->scalar() ?: '';
+}
+
+$cartDraftCount = 0;
+if (!Yii::$app->user->isGuest && (int)Yii::$app->user->identity->permission === 1) {
+    $cartDraftCount = (int)OrderAccountCartDraft::find()->count();
 }
 
 $this->registerCss("
@@ -118,6 +124,9 @@ $sumDebtRepaymentAllSummDollar = (float)($debtQuery->sum('dr.all_summ_dollar') ?
             <?php if(\Yii::$app->user->identity->permission == 1 || \Yii::$app->user->identity->permission == 6){?>
                 <?= Html::a('<span class="btn btn-info btn-xs m-r-5"><i class="fa fa-usd"></i> Dollar kursni o\'zgartirish</span>', ['/exchange-rate/update', 'id' => 1], ['role'=>'modal-remote', 'data-toggle'=>'tooltip']); ?>
                 <?= Html::a('<span class="btn btn-warning btn-xs m-r-5"><i class="fa fa-exclamation-triangle" style="color: white;"></i> Narxdagi farq</span>', ['order-account-history/index', 'large_price' => 1], ['data-pjax' => 0, 'data-toggle'=>'tooltip']); ?>
+                <?php if(\Yii::$app->user->identity->permission == 1){?>
+                    <?= Html::a('<span class="btn btn-danger btn-xs m-r-5"><i class="fa fa-shopping-cart" style="color: white;"></i> Karzinka (' . $cartDraftCount . ')</span>', ['/order-account-history/cartdraft-index'], ['data-pjax' => 0, 'data-toggle'=>'tooltip']); ?>
+                <?php }?>
                 <?= Html::a('<span class="btn btn-success btn-xs m-r-5"><i class="fa fa-list" style="color: white;"></i> Hammasi</span>', ['order-account-history/index'], ['data-pjax' => 0, 'data-toggle'=>'tooltip']); ?>
             <?php }?>
 

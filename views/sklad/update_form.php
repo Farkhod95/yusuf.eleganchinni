@@ -1,11 +1,16 @@
 <?php
 use yii\helpers\Html;
+use yii\helpers\Url;
+use yii\helpers\Json;
+use yii\helpers\ArrayHelper;
 use yii\widgets\ActiveForm;
 use kartik\date\DatePicker;
 use unclead\multipleinput\MultipleInput;
 use app\models\ExchangeRate;
 use app\models\WarehouseHistory;
 use app\models\MyTotalDebt;
+use app\models\Brands;
+use app\models\ProductCategory;
 /* @var $this yii\web\View */
 /* @var $model app\models\Warehouse */
 /* @var $form yii\widgets\ActiveForm */
@@ -15,7 +20,15 @@ $exchangeRate = ExchangeRate::findOne(1);
 
 $warehouseHistory = WarehouseHistory::find()->where(['sklad_id' => $model->id])->all();
 $data = [];
+$categoryIds = [];
+$sizeValues = [];
+$typeIds = [];
+$initialTotal = 0;
 foreach ($warehouseHistory as $warehouse_history) {
+    $categoryIds[] = (int)$warehouse_history->product_category_id;
+    $sizeValues[(string)$warehouse_history->size] = (string)$warehouse_history->size;
+    $typeIds[] = (int)$warehouse_history->type;
+    $initialTotal += ((int)$warehouse_history->count * (float)$warehouse_history->price);
     $data[] = [
         'brand_id' => $warehouse_history->brand_id,
         'product_category_id' => $warehouse_history->product_category_id,
@@ -26,6 +39,29 @@ foreach ($warehouseHistory as $warehouse_history) {
     ];
 }
 
+$categoryIds = array_values(array_unique($categoryIds));
+$typeIds = array_values(array_unique($typeIds));
+$brandList = Brands::listActive();
+$categoryList = $categoryIds ? ArrayHelper::map(
+    ProductCategory::find()
+        ->where(['id' => $categoryIds])
+        ->orderBy(['sorting' => SORT_ASC, 'name' => SORT_ASC])
+        ->all(),
+    'id',
+    'name'
+) : [];
+$sizeList = $sizeValues;
+$typeList = [];
+foreach ($typeIds as $typeId) {
+    $typeList[$typeId] = ProductCategory::getTypeView($typeId);
+}
+
+$urlCats = Url::to(['sklad/categories-by-brand']);
+$urlSizes = Url::to(['sklad/sizes-types-by-category']);
+$urlTypes = Url::to(['sklad/types-by-size']);
+if ($model->sum_all_pro === null || $model->sum_all_pro === '') {
+    $model->sum_all_pro = $initialTotal;
+}
 
 ?>
 
@@ -42,6 +78,11 @@ foreach ($warehouseHistory as $warehouse_history) {
     </div>
     <div class="panel-body">
         <?php $form = ActiveForm::begin(); ?>
+            <?php if (Yii::$app->session->hasFlash('error')): ?>
+                <div class="alert alert-danger">
+                    <?= Html::encode(Yii::$app->session->getFlash('error')) ?>
+                </div>
+            <?php endif; ?>
             <div class="row">
                 <div class="col-md-4">
                     <?= $form->field($model, 'consignor_id')->label()->widget(\kartik\select2\Select2::classname(), [
@@ -101,10 +142,10 @@ foreach ($warehouseHistory as $warehouse_history) {
                                 'title' => 'Model',
                                 'type' => \kartik\select2\Select2::className(),                                
                                 'options' => [
-                                    'data'  => $model->getBrands(),
+                                    'data'  => $brandList,
                                     'options' => [
                                         'placeholder' => 'Tanlang...',
-                                        'class' => 'input-priority',
+                                        'class' => 'input-priority mi-brand',
                                         'required' => true
                                     ], 
                                     'pluginOptions' => [
@@ -121,15 +162,15 @@ foreach ($warehouseHistory as $warehouse_history) {
                                 'title' => 'Nomi',
                                 'type' => \kartik\select2\Select2::className(),
                                 'options' => [
-                                    'data'  => $model->getProductCategories(),
+                                    'data'  => $categoryList,
                                     'options' => [
                                         'placeholder' => 'Tanlang...',
+                                        'class' => 'input-priority mi-category',
                                         'required' => true
                                     ],   
                                     'pluginOptions' => [
                                         'allowClear' => true,
-                                    ],     
-                                    'class' => 'input-priority',
+                                    ],
                                     ],
                                     'headerOptions' => [
                                         'style' => 'width: 370px;',
@@ -139,28 +180,35 @@ foreach ($warehouseHistory as $warehouse_history) {
                             [
                                 'name'  => 'size',
                                 'title' => 'O\'lchami <b style="color:red">(Butun sonni nuqta bilan kiriting. Misol: 9.99 )</b>',
+                                'type' => \kartik\select2\Select2::className(),
                                 'enableError' => true,
-                                'defaultValue' => 0,
+                                'defaultValue' => '',
                                 'options' => [
-                                    'class' => 'input-priority',
-                                    // 'type' =>'number',
-                                    'required' => true,
-                                 ]
+                                    'data' => $sizeList,
+                                    'options' => [
+                                        'placeholder' => 'Tanlang...',
+                                        'class' => 'input-priority mi-size',
+                                        'required' => true
+                                    ],
+                                    'pluginOptions' => [
+                                        'allowClear' => true,
+                                    ],
+                                ]
                             ],
                             [
                                 'name' => 'type',
                                 'title' => 'Tip',
                                 'type' => \kartik\select2\Select2::className(),
                                 'options' => [
-                                    'data'  => $model->getProductDukonType(),
+                                    'data'  => $typeList,
                                     'options' => [
                                         'placeholder' => 'Tanlang...',
+                                        'class' => 'input-priority mi-type',
                                         'required' => true
                                     ],   
                                     'pluginOptions' => [
                                         'allowClear' => true,
-                                    ],     
-                                    'class' => 'input-priority',
+                                    ],
                                     ],
                                     'headerOptions' => [
                                         'style' => 'width: 180px;',
@@ -173,7 +221,9 @@ foreach ($warehouseHistory as $warehouse_history) {
                                 'enableError' => true,
                                 'options' => [
                                     'type' =>'number',
-                                    'class' => 'input-priority target',
+                                    'min' => 1,
+                                    'step' => 1,
+                                    'class' => 'input-priority target mi-count',
                                     'headerOptions' => [
                                         'style' => 'font-size: 40px',
                                     ] ,
@@ -184,8 +234,10 @@ foreach ($warehouseHistory as $warehouse_history) {
                                 'title' => \Yii::$app->user->identity->permission == 1 ? 'Narxi ($)' : '',
                                 'enableError' => true,
                                 'options' => [ 
-                                    // 'type' =>'number',
-                                    'class' => 'input-priority',
+                                    'type' =>'number',
+                                    'min' => 0,
+                                    'step' => '0.01',
+                                    'class' => 'input-priority mi-price',
                                     'style' => \Yii::$app->user->identity->permission == 1 ? '' : 'display: none;',
                                     'options' => [
                                         'id' => 'price',
@@ -269,7 +321,16 @@ foreach ($warehouseHistory as $warehouse_history) {
 <?php
 $this->registerJsFile('/js/cookie.js');
 
-$this->registerJs(<<<JS
+$this->registerJs(
+    'window.__SKLAD_UPDATE_URLS__ = ' . Json::htmlEncode([
+        'cats' => $urlCats,
+        'sizes' => $urlSizes,
+        'types' => $urlTypes,
+    ]) . ';',
+    \yii\web\View::POS_HEAD
+);
+
+$this->registerJs(<<<'JS'
 
 function copyToClipboard(element) {
     element.select(); // Element qiymatini tanlaymiz
@@ -301,23 +362,104 @@ document.getElementById("sum_all_pro").onclick = function() {
     copyToClipboard(this); // Input ustiga bosilganda nusxalaymiz
 };
 
-var product_details = {};
-$(document).on("change", ".input-priority", function() {
-    const attr_name = $(this).attr('name');
-    let id = attr_name.match(/\d/g).join("");
-    
-    const price = parseFloat($("input[name='Sklad[allValue][" + id + "][price]']").val());
-    const count = parseInt($("input[name='Sklad[allValue][" + id + "][count]']").val());
-    
-    if (price && count) {
-        product_details[id] = price * count; // mavjud bo'lsa yangilanadi, bo'lmasa qo'shiladi
-        // console.log('product_details:', product_details);
-        
-        // Umumiy qiymatni hisoblash
-        const total_sum = Object.values(product_details).reduce((a, b) => a + b, 0);
-        $("input[name='Sklad[sum_all_pro]']").val(total_sum);
+function fillSkladSelect($select, items, selectedValue) {
+    $select.empty();
+    $select.append(new Option('Tanlang...', '', false, false));
+
+    (items || []).forEach(function(item) {
+        $select.append(new Option(item.text, item.id, false, false));
+    });
+
+    if (selectedValue !== undefined && selectedValue !== null && selectedValue !== '') {
+        $select.val(String(selectedValue));
+    } else {
+        $select.val('');
     }
+
+    $select.trigger('change.select2');
+}
+
+function getSkladRow($element) {
+    return $element.closest('tr.multiple-input-list__item');
+}
+
+function clearAfterBrand($row) {
+    fillSkladSelect($row.find('select.mi-category'), [], null);
+    fillSkladSelect($row.find('select.mi-size'), [], null);
+    fillSkladSelect($row.find('select.mi-type'), [], null);
+}
+
+function clearAfterCategory($row) {
+    fillSkladSelect($row.find('select.mi-size'), [], null);
+    fillSkladSelect($row.find('select.mi-type'), [], null);
+}
+
+function clearAfterSize($row) {
+    fillSkladSelect($row.find('select.mi-type'), [], null);
+}
+
+function recalcSkladTotal() {
+    var total = 0;
+    $('#my_id').find('tr.multiple-input-list__item').each(function() {
+        var count = parseFloat(($(this).find('input.mi-count').val() || '0').toString().replace(',', '.'));
+        var price = parseFloat(($(this).find('input.mi-price').val() || '0').toString().replace(',', '.'));
+        if (!isNaN(count) && !isNaN(price)) {
+            total += count * price;
+        }
+    });
+
+    $('#sum_all_pro').val(total.toFixed(2).replace(/\.00$/, ''));
+}
+
+$(document).on('change', 'select.mi-brand', function() {
+    var $row = getSkladRow($(this));
+    var brandId = $(this).val();
+    clearAfterBrand($row);
+
+    if (!brandId) return;
+    $.getJSON(window.__SKLAD_UPDATE_URLS__.cats, {brand_id: brandId}, function(res) {
+        fillSkladSelect($row.find('select.mi-category'), res.results || [], null);
+    });
 });
+
+$(document).on('change', 'select.mi-category', function() {
+    var $row = getSkladRow($(this));
+    var brandId = $row.find('select.mi-brand').val();
+    var categoryId = $(this).val();
+    clearAfterCategory($row);
+
+    if (!brandId || !categoryId) return;
+    $.getJSON(window.__SKLAD_UPDATE_URLS__.sizes, {
+        brand_id: brandId,
+        category_id: categoryId
+    }, function(res) {
+        fillSkladSelect($row.find('select.mi-size'), res.sizes || [], null);
+        fillSkladSelect($row.find('select.mi-type'), res.types || [], null);
+    });
+});
+
+$(document).on('change', 'select.mi-size', function() {
+    var $row = getSkladRow($(this));
+    var brandId = $row.find('select.mi-brand').val();
+    var categoryId = $row.find('select.mi-category').val();
+    var size = $(this).val();
+    clearAfterSize($row);
+
+    if (!brandId || !categoryId || !size) return;
+    $.getJSON(window.__SKLAD_UPDATE_URLS__.types, {
+        brand_id: brandId,
+        category_id: categoryId,
+        size: size
+    }, function(res) {
+        fillSkladSelect($row.find('select.mi-type'), res.types || [], null);
+    });
+});
+
+$(document).on('input change', 'input.mi-count, input.mi-price', recalcSkladTotal);
+$('#my_id').on('afterAddRow afterDeleteRow', function() {
+    setTimeout(recalcSkladTotal, 0);
+});
+recalcSkladTotal();
 
 
 $('#cars').on('change', function(e){

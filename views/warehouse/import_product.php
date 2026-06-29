@@ -709,19 +709,22 @@ $("#buy").submit(function(event){
     url: action,
     data: payload,
     method: "POST",
+    dataType: "json",
     beforeSend: function() {
       $("#sellSubmitButton").prop("disabled", true).html('<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Jarayonda...');
     }
   }).done(function(data) {
-    alert(data);
-    $("#modal-dialog2").modal("hide");
-    $(this).addClass("done");
+    if (data && data.success) {
+      window.location.href = data.redirect || "/sklad/index";
+      return;
+    }
+
+    $(".error_summa_dollor").text((data && data.message) ? data.message : "Importni saqlashda xatolik yuz berdi.");
+    $("#sellSubmitButton").prop("disabled", false).html('Importni tasdiqlash');
   }).fail(function(jqXHR, textStatus, errorThrown) {
     console.error("Request failed: " + textStatus + ", " + errorThrown);
-    $("#modal-dialog2").modal("hide");
-  }).always(function() {
+    $(".error_summa_dollor").text("Importni saqlashda xatolik yuz berdi.");
     $("#sellSubmitButton").prop("disabled", false).html('Importni tasdiqlash');
-    $("#modal-dialog2").modal("hide");
   });
 });
 

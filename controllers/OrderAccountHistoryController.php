@@ -6,6 +6,8 @@ use Yii;
 use app\models\OrderAccountHistory;
 use app\models\OrderAccountHistorySearch;
 use yii\web\Controller;
+use yii\web\BadRequestHttpException;
+use yii\web\ForbiddenHttpException;
 use yii\web\NotFoundHttpException;
 use yii\filters\VerbFilter;
 use \yii\web\Response;
@@ -14,6 +16,7 @@ use yii\filters\AccessControl;
 use app\models\ProductAccountHistory;
 use app\models\ProductAccount;
 use app\models\OrderAccount;
+use app\models\OrderAccountCartDraft;
 use app\models\Orders;
 use app\models\OrderProducts;
 use app\models\Client;
@@ -29,6 +32,7 @@ use app\models\Prices;
 use app\models\Warehouse;
 use app\models\KeshbekHistory;
 use yii\db\Expression;
+use yii\data\ActiveDataProvider;
 use yii\data\ArrayDataProvider;
 
 /**
@@ -68,6 +72,7 @@ class OrderAccountHistoryController extends Controller
                 'class' => VerbFilter::className(),
                 'actions' => [
                     'delete' => ['post'],
+                    'cartdraft-delete' => ['post'],
                     'bulk-delete' => ['post'],
                 ],
             ],
@@ -87,6 +92,40 @@ class OrderAccountHistoryController extends Controller
             'searchModel' => $searchModel,
             'dataProvider' => $dataProvider,
         ]);
+    }
+
+    public function actionCartdraftIndex()
+    {
+        if ((int)Yii::$app->user->identity->permission !== 1) {
+            throw new ForbiddenHttpException('Sizga ruxsat yoq.');
+        }
+
+        $dataProvider = new ActiveDataProvider([
+            'query' => OrderAccountCartDraft::find()
+                ->with(['client', 'user'])
+                ->orderBy(['updated_at' => SORT_DESC, 'id' => SORT_DESC]),
+            'pagination' => [
+                'pageSize' => 50,
+            ],
+        ]);
+
+        return $this->render('cartdraft_index', [
+            'dataProvider' => $dataProvider,
+        ]);
+    }
+
+    public function actionCartdraftDelete($id)
+    {
+        if ((int)Yii::$app->user->identity->permission !== 1) {
+            throw new ForbiddenHttpException('Sizga ruxsat yoq.');
+        }
+
+        $model = OrderAccountCartDraft::findOne((int)$id);
+        if ($model) {
+            $model->delete();
+        }
+
+        return $this->redirect(['cartdraft-index']);
     }
 
     public function actionIndexDeptor()
@@ -235,6 +274,44 @@ class OrderAccountHistoryController extends Controller
         }, $typeIds ?: []);
 
         return ['ok' => true, 'types' => $types];
+    }
+
+    public function actionAvailableCount($order_id, $brand_id, $category_id, $size, $type)
+    {
+        Yii::$app->response->format = Response::FORMAT_JSON;
+
+        $brandId = (int)$brand_id;
+        $categoryId = (int)$category_id;
+        $typeId = (int)$type;
+        $sizeNum = (float)str_replace(',', '.', trim((string)$size));
+
+        if (!$brandId || !$categoryId || !$typeId) {
+            return ['ok' => false, 'available' => 0];
+        }
+
+        $warehouse = Warehouse::find()
+            ->andWhere(['brand_id' => $brandId])
+            ->andWhere(['product_category_id' => $categoryId])
+            ->andWhere(['size' => $sizeNum])
+            ->andWhere(['type' => $typeId])
+            ->one();
+
+        $warehouseCount = $warehouse ? (int)$warehouse->count : 0;
+        $oldCount = (int)ProductAccountHistory::find()
+            ->where(['order_account_history_id' => (int)$order_id])
+            ->andWhere(['brand_id' => $brandId])
+            ->andWhere(['product_category_id' => $categoryId])
+            ->andWhere(['size' => $sizeNum])
+            ->andWhere(['type' => $typeId])
+            ->andWhere(['type_sklad_id' => 1])
+            ->sum('count');
+
+        return [
+            'ok' => true,
+            'warehouse_count' => $warehouseCount,
+            'old_count' => $oldCount,
+            'available' => $warehouseCount + $oldCount,
+        ];
     }
     
     public function actionTrashO()
@@ -2086,54 +2163,190 @@ class OrderAccountHistoryController extends Controller
     {
         $model = $this->findModel($id); 
         $orderAccount = OrderAccount::find()->where(['client_id' => $model->client_id])->one();
+        if (!$orderAccount) {
+            throw new NotFoundHttpException('Mijoz qarz hisobi topilmadi.');
+        }
         $client_total_debt = $orderAccount->total_debt;
 
         $client_id = $model->client_id;
         $order_account_status_old = $model->order_account_status;
-        $date_old = $model->date;
 
-        $exchange_rate_old = $model->exchange_rate;
         $sum_dollar_old = $model->sum_dollar;
         $discount_amounts_old = $model->discount_amount;
+        $sum_som_old = $model->sum_som;
+        $sum_cart_old = $model->sum_cart;
+        $sum_transfers_old = $model->sum_transfers;
         
         $total_debt_old = $model->total_debt_old;
         $all_profit_dollar_old = $model->all_profit_dollar;
 
         $all_product_sum_old = $model->all_product_sum;
         $all_pay_summ_old = round($sum_dollar_old + $discount_amounts_old, 2);
-        $all_product_qolgan_sum_old = $all_product_sum_old - $all_pay_summ_old;
         $client = Client::find()->where(['id' => $client_id])->one();
+        if (!$client) {
+            throw new NotFoundHttpException('Mijoz topilmadi.');
+        }
         if ($model->load(Yii::$app->request->post())) {
-            $updateReason = Yii::$app->request->post('OrderAccountHistory')['comment'];
-            $driverInfo = Yii::$app->request->post('OrderAccountHistory')['driver_info'];
-            $fastOrder = Yii::$app->request->post('OrderAccountHistory')['fast_order'];
-            $total_debts_new = Yii::$app->request->post('OrderAccountHistory')['total_debt_old']?? 0;
-            $dates_new = Yii::$app->request->post('OrderAccountHistory')['date'];
-            $exchange_rates_new = Yii::$app->request->post('OrderAccountHistory')['exchange_rate']?? 0;
-            $discount_amounts_new = Yii::$app->request->post('OrderAccountHistory')['discount_amount']?? 0;
-            $sum_dollars_new = Yii::$app->request->post('OrderAccountHistory')['sum_dollar']?? 0;
-            $tasdiq_check_new = isset(Yii::$app->request->post('OrderAccountHistory')['order_account_status']) ? Yii::$app->request->post('OrderAccountHistory')['order_account_status'] : 1;
+            $transaction = null;
+            try {
+            $postData = Yii::$app->request->post('OrderAccountHistory', []);
+            $updateReason = isset($postData['comment']) ? $postData['comment'] : '';
+            $driverInfo = isset($postData['driver_info']) ? $postData['driver_info'] : '';
+            $fastOrder = isset($postData['fast_order']) ? (int)$postData['fast_order'] : 0;
+            $dates_new = isset($postData['date']) ? $postData['date'] : null;
+            $exchange_rates_new = isset($postData['exchange_rate']) ? $postData['exchange_rate'] : 0;
+            $discount_amounts_new = isset($postData['discount_amount']) ? $postData['discount_amount'] : 0;
+            $sum_dollars_new = isset($postData['sum_dollar']) ? $postData['sum_dollar'] : 0;
+            $sum_som_new = isset($postData['sum_som']) ? $postData['sum_som'] : 0;
+            $sum_cart_new = isset($postData['sum_cart']) ? $postData['sum_cart'] : 0;
+            $sum_transfers_new = isset($postData['sum_transfers']) ? $postData['sum_transfers'] : 0;
+            $tasdiq_check_new = isset($postData['order_account_status']) ? (int)$postData['order_account_status'] : 1;
+            $allValues_new = isset($postData['allValue']) ? $postData['allValue'] : [];
+
+            $exchange_rates_new = is_numeric($exchange_rates_new) && $exchange_rates_new != 0 ? $exchange_rates_new : 1;
+            $sum_dollars_new = is_numeric($sum_dollars_new) ? (float)$sum_dollars_new : 0;
+            $discount_amounts_new = is_numeric($discount_amounts_new) ? (float)$discount_amounts_new : 0;
+            $sum_som_new = is_numeric($sum_som_new) ? (float)$sum_som_new : 0;
+            $sum_cart_new = is_numeric($sum_cart_new) ? (float)$sum_cart_new : 0;
+            $sum_transfers_new = is_numeric($sum_transfers_new) ? (float)$sum_transfers_new : 0;
+            $all_pay_summ_new = round($sum_dollars_new, 2);
+
+            foreach ([$sum_dollars_new, $discount_amounts_new, $sum_som_new, $sum_cart_new, $sum_transfers_new] as $amount) {
+                if ((float)$amount < 0) {
+                    throw new BadRequestHttpException('Summalar manfiy bolmasligi kerak.');
+                }
+            }
+
+            if (!$dates_new || !is_array($allValues_new) || empty($allValues_new)) {
+                throw new BadRequestHttpException('Buyurtmada mahsulot bolishi kerak.');
+            }
 
             $productAccountHistory = ProductAccountHistory::find()->where(['order_account_history_id' => $id])->all();
-            foreach ($productAccountHistory as $value) {
-                $warehouseValue = Warehouse::find()
-                                    ->andWhere(['product_category_id' => $value->product_category_id])
-                                    ->andWhere(['brand_id' => $value->brand_id])
-                                    ->andWhere(['size' => $value->size])
-                                    ->andWhere(['type' => $value->type])->one();
-                if ($warehouseValue) {
-                    if ($value->type_sklad_id == 1) {
-                        $warehouseValue->count += $value->count;
-                        $warehouseValue->save(false);                          
+            $oldStockByKey = [];
+            foreach ($productAccountHistory as $oldValue) {
+                if ((int)$oldValue->type_sklad_id === 1) {
+                    $oldKey = implode(':', [
+                        (int)$oldValue->brand_id,
+                        (int)$oldValue->product_category_id,
+                        (float)$oldValue->size,
+                        (int)$oldValue->type,
+                    ]);
+                    if (!isset($oldStockByKey[$oldKey])) {
+                        $oldStockByKey[$oldKey] = 0;
                     }
+                    $oldStockByKey[$oldKey] += (int)$oldValue->count;
                 }
-                ProductAccountHistory::find()->where(['id' => $value['id']])->one()->delete();
             }
-            
-            $exchange_rates_new = is_numeric($exchange_rates_new) && $exchange_rates_new != 0 ? $exchange_rates_new : 1; // Avoid division by zero
-            $sum_dollars_new = is_numeric($sum_dollars_new) ? $sum_dollars_new : 0;
-            $discount_amounts_new = is_numeric($discount_amounts_new) ? $discount_amounts_new : 0;
-            $all_pay_summ_new = round($sum_dollars_new, 2);
+
+            $normalizedItems = [];
+            $stockRequests = [];
+            foreach ($allValues_new as $value) {
+                $value_price = isset($value['price']) ? (float)$value['price'] : -1;
+                $value_count = isset($value['count']) ? (int)$value['count'] : 0;
+                $value_size  = isset($value['size']) ? (float)$value['size'] : 0;
+                $value_type  = isset($value['type']) ? (int)$value['type'] : 0;
+                $brandId = isset($value['brand_id']) ? (int)$value['brand_id'] : 0;
+                $categoryId = isset($value['product_category_id']) ? (int)$value['product_category_id'] : 0;
+                $typeSkladId = isset($value['type_sklad_id']) ? (int)$value['type_sklad_id'] : 0;
+
+                $brand_list = Brands::find()->where(['id' => $brandId])->one();
+                $product_category_list = ProductCategory::find()
+                    ->where(['id' => $categoryId])
+                    ->andWhere(['<>', 'sup_status', 0])
+                    ->one();
+                $type_sklad_list = TypeSklad::find()->where(['id' => $typeSkladId])->one();
+
+                if (!$brand_list || !$product_category_list || !$type_sklad_list || $value_count < 1 || $value_price < 0 || !$value_type) {
+                    throw new BadRequestHttpException('Buyurtma mahsuloti notogri.');
+                }
+
+                $warehouseValue = Warehouse::find()
+                    ->andWhere(['product_category_id' => (int)$product_category_list->id])
+                    ->andWhere(['brand_id' => (int)$brand_list->id])
+                    ->andWhere(['size' => $value_size])
+                    ->andWhere(['type' => $value_type])
+                    ->one();
+
+                if (!$warehouseValue) {
+                    throw new BadRequestHttpException('Bu mahsulot mavjud emas.');
+                }
+
+                $stockKey = implode(':', [
+                    (int)$brand_list->id,
+                    (int)$product_category_list->id,
+                    $value_size,
+                    $value_type,
+                ]);
+                if (!isset($stockRequests[$stockKey])) {
+                    $stockRequests[$stockKey] = [
+                        'warehouse' => $warehouseValue,
+                        'count' => 0,
+                        'old_count' => isset($oldStockByKey[$stockKey]) ? $oldStockByKey[$stockKey] : 0,
+                    ];
+                }
+                $stockRequests[$stockKey]['count'] += $value_count;
+
+                $price_real = 0;
+                $real_prices_product = Prices::find()->where(['warehouse_id' => $warehouseValue->id])->one();
+                if ($real_prices_product) {
+                    $price_real = (float)$real_prices_product->price;
+                }
+
+                $normalizedItems[] = [
+                    'brand' => $brand_list,
+                    'category' => $product_category_list,
+                    'type_sklad' => $type_sklad_list,
+                    'warehouse' => $warehouseValue,
+                    'price' => $value_price,
+                    'count' => $value_count,
+                    'size' => $value_size,
+                    'type' => $value_type,
+                    'price_real' => $price_real,
+                ];
+            }
+
+            foreach ($stockRequests as $stockRequest) {
+                $availableCount = (int)$stockRequest['warehouse']->count + (int)$stockRequest['old_count'];
+                if ((int)$stockRequest['count'] > $availableCount) {
+                    throw new BadRequestHttpException('Bu mahsulotdan ' . $availableCount . ' ta qolgan.');
+                }
+            }
+
+            $transaction = Yii::$app->db->beginTransaction();
+                foreach ($productAccountHistory as $value) {
+                    $oldProductAccount = ProductAccount::find()
+                        ->andWhere(['order_account_id' => $orderAccount->id])
+                        ->andWhere(['brand_id' => (int)$value->brand_id])
+                        ->andWhere(['product_category_id' => (int)$value->product_category_id])
+                        ->andWhere(['type' => (int)$value->type])
+                        ->andWhere(['type_sklad_id' => (int)$value->type_sklad_id])
+                        ->andWhere(['size' => (float)$value->size])
+                        ->one();
+
+                    if ($oldProductAccount) {
+                        $oldProductAccount->count = (int)$oldProductAccount->count - (int)$value->count;
+                        $oldProductAccount->profit = round((float)$oldProductAccount->profit - (float)$value->profit, 2);
+                        if ((int)$oldProductAccount->count <= 0) {
+                            $oldProductAccount->delete();
+                        } else {
+                            $oldProductAccount->save(false);
+                        }
+                    }
+
+                    if ((int)$value->type_sklad_id === 1) {
+                        Warehouse::updateAllCounters(
+                            ['count' => (int)$value->count],
+                            [
+                                'product_category_id' => (int)$value->product_category_id,
+                                'brand_id' => (int)$value->brand_id,
+                                'size' => (float)$value->size,
+                                'type' => (int)$value->type,
+                            ]
+                        );
+                    }
+
+                    $value->delete();
+                }
             
             // OrderAccountHistory malumotlarini yangilash 
             
@@ -2145,6 +2358,9 @@ class OrderAccountHistoryController extends Controller
 
             $model->discount_amount = $discount_amounts_new;
             $model->sum_dollar = $sum_dollars_new;
+            $model->sum_som = $sum_som_new;
+            $model->sum_cart = $sum_cart_new;
+            $model->sum_transfers = $sum_transfers_new;
             $model->cr_date = date('Y-m-d',strtotime($dates_new));
             // $model->cr_date_time = date('Y-m-d H:i:s',strtotime($dates_new.' '.date('H:i:s')));
             $model->update_status = 2; // update_status= 2 bo'lsa o'zgarish bo'lgan lekin tasdiqlanmagan bo'ladi
@@ -2157,25 +2373,21 @@ class OrderAccountHistoryController extends Controller
             $status_order_sklad = 0;
             $hasLargePriceNew = false;
 
-            $allValues_new = Yii::$app->request->post('OrderAccountHistory')['allValue'] ?? null;
+            foreach ($normalizedItems as $item) {
+                    $value_price = $item['price'];
+                    $value_count = $item['count'];
+                    $value_size  = $item['size'];
+                    $value_type  = $item['type'];
 
-            if ($allValues_new) {
-                foreach ($allValues_new as $value) {
-                    $value_price = (float)$value['price'];
-                    $value_count = (int)$value['count'];
-                    $value_size  = (float)$value['size'];
-                    $value_type  = (int)$value['type'];
+                    $brand_list = $item['brand'];
+                    $product_category_list = $item['category'];
+                    $type_sklad_list = $item['type_sklad'];
+                    $warehouseValue = $item['warehouse'];
+                    $price_real = $item['price_real'];
 
-                    $brand_list = Brands::find()->where(['id' => $value['brand_id']])->one();
-                    $product_category_list = ProductCategory::find()
-                        ->where(['id' => $value['product_category_id']])
-                        ->andWhere(['<>', 'sup_status', 0])
-                        ->one();
-                    $type_sklad_list = TypeSklad::find()->where(['id' => $value['type_sklad_id']])->one();
-
-                    if ($value['type_sklad_id'] == 1) {
+                    if ((int)$type_sklad_list->id === 1) {
                         $status_order_sklad = 1;
-                    } elseif ($value['type_sklad_id'] == 2) {
+                    } elseif ((int)$type_sklad_list->id === 2) {
                         $status_order_dukon = 1;
                     }
 
@@ -2187,22 +2399,6 @@ class OrderAccountHistoryController extends Controller
                         ->andWhere(['type_sklad_id' => (int)$type_sklad_list->id])
                         ->andWhere(['size' => $value_size])
                         ->one();
-
-                    $warehouseValue = Warehouse::find()
-                        ->andWhere(['product_category_id' => (int)$product_category_list->id])
-                        ->andWhere(['brand_id' => (int)$brand_list->id])
-                        ->andWhere(['size' => $value_size])
-                        ->andWhere(['type' => $value_type])
-                        ->one();
-
-                    // Ombordagi haqiqiy narx (Prices jadvalidan)
-                    $price_real = 0;
-                    if ($warehouseValue) {
-                        $real_prices_product = Prices::find()->where(['warehouse_id' => $warehouseValue->id])->one();
-                        if ($real_prices_product) {
-                            $price_real = (float)$real_prices_product->price;
-                        }
-                    }
 
                     // Narx nisbatini belgilash (istaganizcha shart)
                     if ($price_real > 0 && $value_price < $price_real) {
@@ -2229,6 +2425,7 @@ class OrderAccountHistoryController extends Controller
                         $relative->real_price               = $price_real;
                         $relative->type_sklad_id            = $type_sklad_list->id;
                         $relative->is_debtor                = $hasLargePriceNew ? 1 : 0;
+                        $relative->warehouse_id             = $warehouseValue->id;
                         $relative->profit                   = round($lineProfit, 2);
                         $relative->cr_date                  = date('Y-m-d', strtotime($dates_new));
                         $relative->save(false);
@@ -2238,6 +2435,7 @@ class OrderAccountHistoryController extends Controller
                         $productAccount->price      = $value_price;
                         $productAccount->real_price = $price_real;
                         $productAccount->is_debtor  = $hasLargePriceNew ? 1 : 0;
+                        $productAccount->warehouse_id = $warehouseValue->id;
                         $productAccount->profit     = round($productAccount->profit + $lineProfit, 2);
                         $productAccount->save(false);
                     }
@@ -2257,20 +2455,25 @@ class OrderAccountHistoryController extends Controller
                     $relativeHistory->type_sklad_id            = $type_sklad_list->id;
                     $relativeHistory->profit                   = round($lineProfit, 2);
                     $relativeHistory->is_debtor                = $hasLargePriceNew ? 1 : 0;
+                    $relativeHistory->warehouse_id             = $warehouseValue->id;
                     $relativeHistory->cr_date                  = date('Y-m-d', strtotime($dates_new));
                     $relativeHistory->save(false);
 
                     // Ombor sonini kamaytirish
-                    if ($warehouseValue && $type_sklad_list->id == 1) {
-                        $warehouseValue->count = $warehouseValue->count - $value_count;
-                        $warehouseValue->save(false);
+                    if ((int)$type_sklad_list->id === 1) {
+                        $updatedWarehouseRows = Warehouse::updateAllCounters(
+                            ['count' => -$value_count],
+                            ['and', ['id' => $warehouseValue->id], ['>=', 'count', $value_count]]
+                        );
+                        if (!$updatedWarehouseRows) {
+                            throw new BadRequestHttpException('Bu mahsulotdan ' . (int)$warehouseValue->count . ' ta qolgan.');
+                        }
                     }
 
                     // Umumiy summalarni yig‘ish
                     $all_profit_new         += $lineProfit;
                     $all_profit_array_new[]  = $lineProfit;
                     $all_product_summ_new   += $value_price * $value_count;
-                }
             }
 
 
@@ -2289,6 +2492,9 @@ class OrderAccountHistoryController extends Controller
                 $orderAccount->all_summ_dollar = round($orderAccount->all_summ_dollar - $all_pay_summ_old, 2);
                 $orderAccount->discount_amount = $orderAccount->discount_amount - (float)$discount_amounts_old;
                 $orderAccount->sum_dollar = $orderAccount->sum_dollar - (float)$sum_dollar_old;
+                $orderAccount->sum_som = $orderAccount->sum_som - (float)$sum_som_old;
+                $orderAccount->sum_cart = $orderAccount->sum_cart - (float)$sum_cart_old;
+                $orderAccount->sum_transfers = $orderAccount->sum_transfers - (float)$sum_transfers_old;
                 $orderAccount->all_product_sum = $orderAccount->all_product_sum - $all_product_sum_old;
                 $orderAccount->total_debt = $client_total_debt - ($all_product_sum_old - $all_pay_summ_old);
                 $orderAccount->total_debt_old = $client_total_debt - ($all_product_sum_old - $all_pay_summ_old);
@@ -2308,6 +2514,9 @@ class OrderAccountHistoryController extends Controller
                 $orderAccount->all_summ_dollar = round($orderAccount->all_summ_dollar + $all_pay_summ_new, 2);
                 $orderAccount->discount_amount = $orderAccount->discount_amount + (float)$discount_amounts_new;
                 $orderAccount->sum_dollar = $orderAccount->sum_dollar + (float)$sum_dollars_new;
+                $orderAccount->sum_som = $orderAccount->sum_som + (float)$sum_som_new;
+                $orderAccount->sum_cart = $orderAccount->sum_cart + (float)$sum_cart_new;
+                $orderAccount->sum_transfers = $orderAccount->sum_transfers + (float)$sum_transfers_new;
                 if ($client->is_profit_loss == 1) {
                     $orderAccount->all_profit_dollar = 0;
                 }else{
@@ -2448,6 +2657,8 @@ class OrderAccountHistoryController extends Controller
                     $keshbekClient->keshbek_sum = round(($all_product_summ_new * $keshbekClient->keshbek) / 100, 2);
                     $keshbekClient->cr_date = date('Y-m-d', strtotime($dates_new));
                     $keshbekClient->save(false);
+                } else {
+                    KeshbekHistory::deleteAll(['order_account_history_id' => $model->id]);
                 }
             }else{
                 $elegantHistoryUpdate = new ElegantHistoryUpdate();
@@ -2458,8 +2669,26 @@ class OrderAccountHistoryController extends Controller
                 $elegantHistoryUpdate->order_account_history_id = $model->id;
                 $elegantHistoryUpdate->save(false);
             }
+            $transaction->commit();
             Yii::$app->session->setFlash('success', 'Ma\'lumotlar muvaffaqiyatli yangilandi.');
             return $this->redirect(['index']);
+            } catch (BadRequestHttpException $e) {
+                if ($transaction && $transaction->isActive) {
+                    $transaction->rollBack();
+                }
+                return $this->render('update', [
+                    'model' => $model,
+                    'client_total_debt' => $model->total_debt_old ? $model->total_debt_old : 0,
+                    'order_account_status_old' => $order_account_status_old,
+                    'type' => $type,
+                    'stockError' => $e->getMessage(),
+                ]);
+            } catch (\Throwable $e) {
+                if ($transaction && $transaction->isActive) {
+                    $transaction->rollBack();
+                }
+                throw $e;
+            }
         }
 
         return $this->render('update', ['model' => $model, 'client_total_debt' => $model->total_debt_old?$model->total_debt_old:0, 'order_account_status_old'=> $order_account_status_old, 'type' => $type]);
