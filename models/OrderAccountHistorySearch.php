@@ -16,11 +16,12 @@ class OrderAccountHistorySearch extends OrderAccountHistory
     public $date_to;
 
     public $client_type;
+    public $is_vozvrat;
 
     public function rules()
     {
         return [
-            [['id', 'client_id', 'created_by', 'update_status', 'status_order_dukon', 'status_order_sklad', 'is_debt', 'is_delete', 'is_worker', 'large_price', 'fast_order', 'is_debtor', 'client_type', 'is_sent'], 'integer'],
+            [['id', 'client_id', 'created_by', 'update_status', 'status_order_dukon', 'status_order_sklad', 'is_debt', 'is_delete', 'is_worker', 'large_price', 'fast_order', 'is_debtor', 'client_type', 'is_sent', 'is_vozvrat'], 'integer'],
             [['order_account_status'], 'boolean'],
             [['date', 'date_last_debt_payment', 'last_order_date', 'cr_date', 'cr_date_time', 'order_commit', 'driver_info', 'date_from', 'date_to'], 'safe'],
             [['exchange_rate', 'all_product_sum', 'discount_amount', 'all_summ_dollar', 'all_profit_dollar', 'total_debt', 'total_debt_today', 'dollar_sumda', 'total_debt_old', 'number_of_orders', 'sum_som', 'sum_dollar', 'sum_cart', 'sum_transfers', 'zdacha_sum', 'zdacha_dollar'], 'number'],
@@ -104,6 +105,9 @@ class OrderAccountHistorySearch extends OrderAccountHistory
         if (isset($params['large_price']) && $params['large_price'] !== '') {
             $this->large_price = (int)$params['large_price'];
         }
+        if (isset($params['is_vozvrat']) && $params['is_vozvrat'] !== '') {
+            $this->is_vozvrat = (int)$params['is_vozvrat'];
+        }
 
         if (!$this->validate()) {
             // uncomment the following line if you do not want to return any records when validation fails
@@ -119,6 +123,7 @@ class OrderAccountHistorySearch extends OrderAccountHistory
             'oah.is_delete' => $this->is_delete,
             'oah.is_worker' => $this->is_worker,
             'oah.is_sent' => $this->is_sent,
+            'oah.is_vozvrat' => $this->is_vozvrat,
             'oah.client_id' => $this->client_id,
             'oah.order_account_status' => $this->order_account_status,
             'oah.date' => $this->date,

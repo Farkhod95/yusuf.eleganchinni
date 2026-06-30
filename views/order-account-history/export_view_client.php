@@ -142,7 +142,7 @@ foreach ($orderAccountSumm as $orderAccountValue) {
                                     <td colspan="4" style="background-color:#a0d9ea;" ><b style="color:red"><?= $model->brand->name ?></b></td>
                                     <td style="background-color:#a0d9ea;"></td>
                                 </tr>
-                                <?php  foreach ($orderProduct = ProductAccountHistory::find()->andWhere(['brand_id' => $model->brand->id])->andWhere(['order_account_history_id' => $order_id])->andWhere(['cr_date' => $cr_date])->all() as $model1) { ?>
+                                <?php  foreach ($orderProduct = ProductAccountHistory::find()->andWhere(['brand_id' => $model->brand->id])->andWhere(['order_account_history_id' => $order_id])->andWhere(['cr_date' => $cr_date])->andWhere(['or', ['vozvrat_order_id' => null], ['vozvrat_order_id' => 0]])->all() as $model1) { ?>
                                     <tr>
                                         <td><?= $i ?></td>
                                         <td><?= $model1->brand->name ?></td>

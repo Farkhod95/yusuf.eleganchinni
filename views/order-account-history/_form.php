@@ -17,6 +17,7 @@ use app\models\ProductCategory;
 
 $historyRows = ProductAccountHistory::find()
     ->where(['order_account_history_id' => $model->id])
+    ->andWhere(['or', ['vozvrat_order_id' => null], ['vozvrat_order_id' => 0]])
     ->all();
 
 /**
@@ -570,14 +571,15 @@ function validateStockKey(key) {
 
     var requested = requestedCountByStockKey(key);
     var available = parseInt(res.available || 0, 10);
+    var warehouseCount = parseInt(res.warehouse_count || 0, 10);
     var hasError = requested > available;
     var rows = getRowsByStockKey(key);
     rows.forEach(function($row){
       var $cnt = $row.find('input.mi-count');
       if (hasError) {
-        showCountMessage($cnt, 'Bu mahsulotdan ' + available + ' ta qolgan. Siz ' + requested + ' ta kiritdingiz.', true);
+        showCountMessage($cnt, 'Bu mahsulotdan ' + warehouseCount + ' ta qolgan. Siz ' + requested + ' ta kiritdingiz.', true);
       } else if (requested > 0) {
-        showCountMessage($cnt, 'Qoldiq: ' + available + ' ta', false);
+        showCountMessage($cnt, 'Qoldiq: ' + warehouseCount + ' ta', false);
       }
     });
     return hasError;

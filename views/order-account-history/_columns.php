@@ -182,6 +182,28 @@ return [
     // ],
     [
         'class'=>'\kartik\grid\DataColumn',
+        'attribute'=>'is_vozvrat',
+        'header'=>'Vozvrat',
+        'format'=>'raw',
+        'width'=>'100px',
+        'filter' => ($showFilter === 1) ? false : [
+            1 => 'Bor',
+            0 => 'Yo\'q',
+        ],
+        'content' => function ($data) {
+            if ((int)$data->is_vozvrat === 1) {
+                return Html::a(
+                    '<span class="label label-danger">Bor</span>',
+                    ['/order-account-history/products', 'id' => $data->id, 'type' => 'index'],
+                    ['data-pjax' => 0, 'title' => 'Vozvrat qilingan mahsulotlarni ko\'rish']
+                );
+            }
+
+            return '<span class="label label-default">Yo\'q</span>';
+        },
+    ],
+    [
+        'class'=>'\kartik\grid\DataColumn',
         'attribute'=>'all_product_sum',
         'contentOptions' => function ($model, $key, $index, $column) use ($dataProvider) {
             if ($model->fast_order == 1){
@@ -766,4 +788,4 @@ return [
     ],
 
 
-];   
+];

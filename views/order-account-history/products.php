@@ -21,6 +21,29 @@ $allMarkGivenCount = 0;
 $allMarkSumm = 0;
 $allMarkRealSumm = 0;
 $allMarkProfitSumm = 0;
+$vozvratProductSum = 0;
+$vozvratRefundSum = 0;
+$vozvratRowsForSummary = ProductAccountHistory::find()
+    ->where(['order_account_history_id' => $order_id])
+    ->andWhere(['not', ['vozvrat_order_id' => null]])
+    ->with('vozvratOrder')
+    ->all();
+foreach ($vozvratRowsForSummary as $vozvratRow) {
+    $rowCount = (int)$vozvratRow->count;
+    $rowSum = $vozvratRow->vozvrat_summa !== null
+        ? (float)$vozvratRow->vozvrat_summa
+        : $rowCount * (float)$vozvratRow->price;
+    $vozvratProductSum += $rowSum;
+
+    if ($vozvratRow->vozvratOrder) {
+        $vozvratOrderProductSum = (float)$vozvratRow->vozvratOrder->product_summ_dollar;
+        if ($vozvratOrderProductSum > 0) {
+            $vozvratRefundSum += ((float)$vozvratRow->vozvratOrder->all_summ_dollar * $rowSum) / $vozvratOrderProductSum;
+        }
+    }
+}
+$vozvratDebtDiscount = round($vozvratProductSum - $vozvratRefundSum, 2);
+$debtProductSum = round((float)$orderAccount->all_product_sum - $vozvratDebtDiscount, 2);
 CrudAsset::register($this);
 ?>
 <div class="row">
@@ -96,6 +119,22 @@ CrudAsset::register($this);
                                 <th nowrap style="text-align: left; color:#474ba0">To'langan summa kartada:</th>
                                 <td ><b style="color:#474ba0"><?= Yii::$app->formatter->asDecimal($orderAccount->sum_cart, 2)?></b></td>
                             </tr>
+                            <?php if($vozvratProductSum > 0){?>
+                                <tr>
+                                    <th nowrap style="text-align: left; width: 150px; color:red">Vozvrat mahsulot summasi ($):</th>
+                                    <td><b style="color:red"><?= Yii::$app->formatter->asDecimal($vozvratProductSum, 2) ?> $,</b></td>
+                                    <td style="width: 10px;"></td>
+                                    <th nowrap style="text-align: left; color:red">Mijozga qaytarilgan summa ($):</th>
+                                    <td><b style="color:red"><?= Yii::$app->formatter->asDecimal($vozvratRefundSum, 2) ?> $</b></td>
+                                </tr>
+                                <tr>
+                                    <th nowrap style="text-align: left; width: 150px; color:red">Qarzdan ayrilgan summa ($):</th>
+                                    <td><b style="color:red"><?= Yii::$app->formatter->asDecimal($vozvratDebtDiscount, 2) ?> $,</b></td>
+                                    <td style="width: 10px;"></td>
+                                    <th nowrap style="text-align: left; color:#f59c1a">Hisobga kiradigan summa ($):</th>
+                                    <td><b style="color:#f59c1a"><?= Yii::$app->formatter->asDecimal($debtProductSum, 2) ?> $</b></td>
+                                </tr>
+                            <?php }?>
                             <tr>
                                 <th nowrap style="text-align: left; width: 150px;color:#f59c1a">Qolgan qarz ($):</th>
                                 <td ><b style="color:#f59c1a"><?=  Yii::$app->formatter->asDecimal($orderAccount2->total_debt, 2) ?> $</b></td>
@@ -123,6 +162,7 @@ CrudAsset::register($this);
                                 <th nowrap>Joyi</th>
                                 <th nowrap>Model</th>
                                 <th nowrap>Nomi</th>
+                                <th nowrap>Holati</th>
                                 <th nowrap>O'lchami</th>
                                 <th nowrap>Tip</th>
                                 <th nowrap>Soni</th>
@@ -140,16 +180,16 @@ CrudAsset::register($this);
                             <?php  foreach ($warehouse as $model) { $i = 1; $allCount = 0; $allGivenCount = 0; $allSumm = 0; $allRealSumm = 0;  $allProfitSumm = 0;?>
                                 <tr>
                                     <?php if(Yii::$app->user->identity->permission == 1){?>
-                                        <td colspan="10" style="background-color:#a0d9ea;" ><b style="color:red"><?= $model->brand->name ?></b></td>
-                                        <td style="background-color:#a0d9ea;"></td>
+                                        <td colspan="12" style="background-color:#a0d9ea;" ><b style="color:red"><?= $model->brand->name ?></b></td>
                                     <?php }else{?>
-                                        <td colspan="8" style="background-color:#a0d9ea;" ><b style="color:red"><?= $model->brand->name ?></b></td>
-                                        <td style="background-color:#a0d9ea;"></td>
+                                        <td colspan="10" style="background-color:#a0d9ea;" ><b style="color:red"><?= $model->brand->name ?></b></td>
                                     <?php }?>
                                 </tr>
                                 <?php  foreach ($warehouses = ProductAccountHistory::find()
                                                 ->andWhere(['brand_id' => $model->brand->id])
-                                                ->andWhere(['order_account_history_id' => $order_id])->all() as $model1) { 
+                                                ->andWhere(['order_account_history_id' => $order_id])
+                                                ->andWhere(['or', ['vozvrat_order_id' => null], ['vozvrat_order_id' => 0]])
+                                                ->all() as $model1) {
                                     $largePrice = $model1->price < $model1->real_price ?  '<i class="fa fa-exclamation-triangle" style="color: orange; font-size: 22px; cursor: pointer;" data-toggle="tooltip" title="Mahsulot narxi Asl narxidan kam"></i>':'';                
                                     ?>
                                     <tr >
@@ -177,6 +217,8 @@ CrudAsset::register($this);
                                             <td> <b ><?= $model1->product_category_id ? $model1->productCategory->name :'' ?></b></td>
                                         <?php }?>
 
+                                        <td><b>Buyurtma</b></td>
+
                                         <?php if($model1->type_sklad_id ==1){ ?> 
                                             <td > <b ><?= $model1->size ?></b></td>
                                         <?php }else{?>
@@ -190,9 +232,13 @@ CrudAsset::register($this);
                                         <?php }?>
                                         
                                         <?php if($model1->type_sklad_id ==1){ ?> 
-                                            <td > <b ><?= $model1->count ?></b></td>
+                                            <td >
+                                                <b ><?= $model1->count ?></b>
+                                            </td>
                                         <?php }else{?>
-                                            <td> <b ><?= $model1->count ?></b></td>
+                                            <td>
+                                                <b ><?= $model1->count ?></b>
+                                            </td>
                                         <?php }?>
                                         <?php if($model1->type_sklad_id ==1){ 
                                             if ($model1->count == $model1->given_count) {
@@ -267,7 +313,7 @@ CrudAsset::register($this);
                                     } ?>
                                 <tr>
                                     <?php if(Yii::$app->user->identity->permission == 1){?>
-                                        <td colspan="5"  ><b ></b></td>
+                                        <td colspan="6"  ><b ></b></td>
                                         <td ><b style="color:#000;font-size: 15px" >Jami:</b></td>
                                         <td ><b style="color:#000;font-size: 15px"><?= $allCount ?></b></td>
                                         <td ><b style="color:#000;font-size: 15px"><?= $allGivenCount ?></b></td>
@@ -275,7 +321,7 @@ CrudAsset::register($this);
                                         <td ><b style="color:#000;font-size: 15px"><?= $allRealSumm ?></b></td>
                                         <td ><b style="color:#000;font-size: 15px"><?= $allProfitSumm ?></b></td>
                                     <?php }else{?>
-                                        <td colspan="5"  ><b ></b></td>
+                                        <td colspan="6"  ><b ></b></td>
                                         <td ><b style="color:#000;font-size: 15px" >Jami:</b></td>
                                         <td ><b style="color:#000;font-size: 15px"><?= $allCount ?></b></td>
                                         <td ><b style="color:#000;font-size: 15px"><?= $allGivenCount ?></b></td>
@@ -289,14 +335,14 @@ CrudAsset::register($this);
                          
                             <tr>
                                 <?php if(Yii::$app->user->identity->permission == 1){?>
-                                    <td colspan="6" style="background-color:#2d353c;"><b style="color:white">Jami:</b></td>
+                                    <td colspan="7" style="background-color:#2d353c;"><b style="color:white">Jami:</b></td>
                                     <td style="background-color:#2d353c;"><b style="color:white"><?= $allMarkCount ?></b></td>
                                     <td style="background-color:#2d353c;"><b style="color:white"><?= $allMarkGivenCount ?></b></td>
                                     <td style="background-color:#2d353c;"><b style="color:white"><?= $allMarkSumm ?></b></td>
                                     <td style="background-color:#2d353c;"><b style="color:white"><?= $allMarkRealSumm ?></b></td>
                                     <td style="background-color:#2d353c;"><b style="color:white"><?= $allMarkProfitSumm ?></b></td>
                                 <?php }else{?>
-                                    <td colspan="6" style="background-color:#2d353c;"><b style="color:white">Jami:</b></td>
+                                    <td colspan="7" style="background-color:#2d353c;"><b style="color:white">Jami:</b></td>
                                     <td style="background-color:#2d353c;"><b style="color:white"><?= $allMarkCount ?></b></td>
                                     <td style="background-color:#2d353c;"><b style="color:white"><?= $allMarkGivenCount ?></b></td>
                                     <td style="background-color:#2d353c;"><b style="color:white"><?= $allMarkSumm ?></b></td>
@@ -305,6 +351,73 @@ CrudAsset::register($this);
                             </tr>
                         </tbody>
                     </table>
+                    <?php if($vozvratProductSum > 0){?>
+                        <h4 style="margin-top: 25px; color:#d9534f"><b>Vozvrat qilingan mahsulotlar</b></h4>
+                        <table class="table">
+                            <thead>
+                                <tr>
+                                    <th>#</th>
+                                    <th nowrap>Joyi</th>
+                                    <th nowrap>Model</th>
+                                    <th nowrap>Nomi</th>
+                                    <th nowrap>Holati</th>
+                                    <th nowrap>O'lchami</th>
+                                    <th nowrap>Tip</th>
+                                    <th nowrap>Soni</th>
+                                    <th nowrap>Narxi ($)</th>
+                                    <th nowrap>Vozvrat summa ($)</th>
+                                    <th nowrap>Mijozga qaytarilgan ($)</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php
+                                    $vozvratIndex = 1;
+                                    $vozvratTableCount = 0;
+                                    $vozvratTableSum = 0;
+                                    $vozvratTableRefund = 0;
+                                ?>
+                                <?php foreach ($vozvratRowsForSummary as $vozvratRow) {
+                                    $rowCount = (int)$vozvratRow->count;
+                                    $rowSum = $vozvratRow->vozvrat_summa !== null
+                                        ? (float)$vozvratRow->vozvrat_summa
+                                        : $rowCount * (float)$vozvratRow->price;
+                                    $rowPrice = $rowCount > 0 ? $rowSum / $rowCount : (float)$vozvratRow->price;
+                                    $rowRefund = 0;
+                                    if ($vozvratRow->vozvratOrder) {
+                                        $vozvratOrderProductSum = (float)$vozvratRow->vozvratOrder->product_summ_dollar;
+                                        if ($vozvratOrderProductSum > 0) {
+                                            $rowRefund = ((float)$vozvratRow->vozvratOrder->all_summ_dollar * $rowSum) / $vozvratOrderProductSum;
+                                        }
+                                    }
+                                    $vozvratDate = $vozvratRow->vozvratOrder ? date('d.m.Y', strtotime($vozvratRow->vozvratOrder->cr_date_time ?: $vozvratRow->vozvratOrder->date)) : '';
+                                    $vozvratTableCount += $rowCount;
+                                    $vozvratTableSum += $rowSum;
+                                    $vozvratTableRefund += $rowRefund;
+                                ?>
+                                    <tr style="color:#d9534f">
+                                        <td><b><?= $vozvratIndex ?></b></td>
+                                        <td><b><?= $vozvratRow->typeSklad ? $vozvratRow->typeSklad->name : '' ?></b></td>
+                                        <td><b><?= $vozvratRow->brand ? $vozvratRow->brand->name : '' ?></b></td>
+                                        <td><b><?= $vozvratRow->product_category_id && $vozvratRow->productCategory ? $vozvratRow->productCategory->name : '' ?></b></td>
+                                        <td><b>Vozvrat<?= $vozvratDate ? ' (' . $vozvratDate . ')' : '' ?></b></td>
+                                        <td><b><?= $vozvratRow->size ?></b></td>
+                                        <td><b><?= $vozvratRow->getTypeView($vozvratRow->type) ?></b></td>
+                                        <td><b><?= $rowCount ?></b></td>
+                                        <td><b><?= Yii::$app->formatter->asDecimal($rowPrice, 2) ?></b></td>
+                                        <td><b><?= Yii::$app->formatter->asDecimal($rowSum, 2) ?></b></td>
+                                        <td><b><?= Yii::$app->formatter->asDecimal($rowRefund, 2) ?></b></td>
+                                    </tr>
+                                <?php $vozvratIndex++; } ?>
+                                <tr>
+                                    <td colspan="7"><b style="color:#000;font-size: 15px">Jami:</b></td>
+                                    <td><b style="color:#000;font-size: 15px"><?= $vozvratTableCount ?></b></td>
+                                    <td></td>
+                                    <td><b style="color:#000;font-size: 15px"><?= Yii::$app->formatter->asDecimal($vozvratTableSum, 2) ?></b></td>
+                                    <td><b style="color:#000;font-size: 15px"><?= Yii::$app->formatter->asDecimal($vozvratTableRefund, 2) ?></b></td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    <?php }?>
                     <?php Pjax::end(); ?>
                     
                 </div>

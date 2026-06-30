@@ -84,16 +84,22 @@ class ProductCategory extends \yii\db\ActiveRecord
         // Har xil formatlarni normalize qilamiz:
         // A) ['size' => [2,4,5]]  B) [['size'=>2],['size'=>4]]  C) [2,4,5]
         if (isset($list['size']) && is_array($list['size'])) {
-            $list = array_map(function ($v) {
-                return ['size' => $v];
-            }, $list['size']);
+            $types = isset($list['type']) && is_array($list['type']) ? $list['type'] : [];
+            $list = array_map(function ($v, $k) use ($types) {
+                return [
+                    'size' => $v,
+                    'type' => isset($types[$k]) ? $types[$k] : null,
+                ];
+            }, $list['size'], array_keys($list['size']));
         }
 
         $ok = 0; $rowNum = 0;
         foreach ($list as $row) {
             $rowNum++;
             $val = is_array($row) ? ($row['size'] ?? null) : $row;
+            $type = is_array($row) ? ($row['type'] ?? null) : null;
             $val = is_string($val) ? str_replace(',', '.', trim($val)) : $val;
+            $type = is_string($type) ? trim($type) : $type;
 
             if ($val === null || $val === '') {
                 $this->addError($attribute, "№{$rowNum} qatorda o‘lcham kiritilmagan.");
@@ -101,6 +107,14 @@ class ProductCategory extends \yii\db\ActiveRecord
             }
             if (!is_numeric($val)) {
                 $this->addError($attribute, "№{$rowNum} qatorda o‘lcham noto‘g‘ri formatda (faqat raqam).");
+                continue;
+            }
+            if ($type === null || $type === '') {
+                $this->addError($attribute, "№{$rowNum} qatorda tip tanlanmagan.");
+                continue;
+            }
+            if (!array_key_exists((string)(int)$type, $this->getType())) {
+                $this->addError($attribute, "№{$rowNum} qatorda tip noto'g'ri tanlangan.");
                 continue;
             }
             $ok++;

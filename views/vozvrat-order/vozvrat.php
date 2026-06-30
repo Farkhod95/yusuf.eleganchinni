@@ -1,4 +1,4 @@
-<?php
+﻿<?php
 use yii\helpers\Html;
 use yii\bootstrap\ActiveForm;
 use app\models\Warehouse;
@@ -27,6 +27,7 @@ $exchangeRate = ExchangeRate::find()->where(['id' => 1])->one();
 
 /** Brand id=>name xaritasi JS ga chiqsin */
 $this->registerJsVar('BRAND_MAP', ArrayHelper::map($brands, 'id', 'name'));
+$this->registerJsVar('VOZVRAT_CLIENT_PRODUCTS_URL', Url::to(['vozvrat-order/client-products']));
 $catAjaxUrl = Url::to(['product-category/by-brand']); // AJAX endpoint (absolyut/relative muhim emas)
 ?>
 <style>
@@ -151,39 +152,16 @@ input:checked + .slider:before {
                   <th nowrap style="background-color:#d4ddd7;"><b>Model</b></th>
                   <th nowrap style="background-color:#d4ddd7;"><b>Nomi</b></th>
                   <th nowrap style="background-color:#d4ddd7;"><b>O'lchami</b></th>
-                  <th nowrap style="background-color:#d4ddd7;"><b>Sklad soni</b></th>
+                  <th nowrap style="background-color:#d4ddd7;"><b>Qolgan soni</b></th>
                   <th nowrap style="background-color:#d4ddd7;"><b>Tip</b></th>
                 </tr>
               </thead>
               <tbody id="showRes">
-                <?php foreach ($warehouse as $model) { $i = 1; $allCount = 0; ?>
-                  <tr class="handle-header">
-                    <td colspan="5" style="background-color:#a0d9ea;"><b style="color:red"><?= $model->brand->name ?></b></td>
-                    <td style="background-color:#a0d9ea;"></td>
-                  </tr>
-
-                  <?php
-                  $warehouses = isset($warehouseByBrand[$model->brand_id]) ? $warehouseByBrand[$model->brand_id] : [];
-                  foreach ($warehouses as $model1) {
-                  ?>
-                    <tr class="handle"
-                      id="warehouse_<?= $model1->id ?>"
-                      data-name="<?= strtolower($model1->product_category_id ? $model1->productCategory->name : '') ?>"
-                      data-brand-id="<?= $model1->brand_id ?>"
-                      data-category-id="<?= $model1->product_category_id ?>"
-                      data-amount-row="brand_<?= $model1->brand_id ?>_amount">
-                      <td style="border-top:1px solid #bebabaff; border-bottom:1px solid #bebabaff; border-left:none; border-right:none;background-color:#efdfdf;width: 15%;"><b><?= $i ?></b></td>
-                      <td style="border-top:1px solid #bebabaff; border-bottom:1px solid #bebabaff; border-left:none; border-right:none;background-color:#efdfdf;width: 15%;"><b><?= $model1->brand->name ?></b></td>
-                      <td style="border-top:1px solid #bebabaff; border-bottom:1px solid #bebabaff; border-left:none; border-right:none;background-color:#efdfdf;width: 15%;"><b><?= $model1->product_category_id ? $model1->productCategory->name : '' ?></b></td>
-                      <td style="border-top:1px solid #bebabaff; border-bottom:1px solid #bebabaff; border-left:none; border-right:none;background-color:#efdfdf;width: 15%;"><b><?= $model1->size ?></b></td>
-                      <td style="border-top:1px solid #bebabaff; border-bottom:1px solid #bebabaff; border-left:none; border-right:none;background-color:#efdfdf;width: 15%; color:#8f302d;font-size:14px"><b><?= $model1->count ?></b></td>
-                      <td style="border-top:1px solid #bebabaff; border-bottom:1px solid #bebabaff; border-left:none; border-right:none;background-color:#efdfdf;width: 15%;"><b><?= $model1->getTypeClientView($model1->type) ?></b></td>
-                      <td style="display:none;"><?= $model1->id ?></td>
-                    </tr>
-                  <?php $i++; $allCount += $model1->count; $allMarkCount += $model1->count; } ?>
-
-                  <tr class="brand_<?= $model->brand->id ?>_amount"></tr>
-                <?php } ?>
+                <tr class="empty-client-products">
+                  <td colspan="6" style="background-color:#efdfdf;text-align:center;color:#8f302d;">
+                    <b>Mijoz tanlangandan keyin xarid qilingan mahsulotlar chiqadi.</b>
+                  </td>
+                </tr>
               </tbody>
             </table>
           </div>
@@ -193,7 +171,7 @@ input:checked + .slider:before {
     </div>
   </div>
 
-  <!-- O'ng panel — mijoz buyurtmasi (o'zgartirmadim) -->
+  <!-- O'ng panel вЂ” mijoz buyurtmasi (o'zgartirmadim) -->
   <div class="col-md-7" style="position: sticky; top: 60px;">
     <div class="panel panel-inverse">
       <div class="panel-heading" style="background-color: #b35555;">
@@ -271,6 +249,7 @@ input:checked + .slider:before {
           <input type="hidden" name="maxsulot_tipi">
           <input type="hidden" name="brand_id">
           <input type="hidden" name="product_category_id">
+          <input type="hidden" name="source_order_history_id">
 
           <div class="form-group row m-b-15">
             <label class="col-sm-4 col-form-label"><h5><b>Model:</b></h5></label>
@@ -425,7 +404,7 @@ input:checked + .slider:before {
 <?php
 $this->registerJsFile('/js/cookie.js');
 
-/** Qolgan JS (sizniki) — o‘zgartirmadim. Faqat brand→category filtri bo‘limini pastda qo‘shdim. */
+/** Qolgan JS (sizniki) вЂ” oвЂzgartirmadim. Faqat brandв†’category filtri boвЂlimini pastda qoвЂshdim. */
 $this->registerJs(<<<'JS'
 function adjustTableClass() {
   var screenWidth = window.innerWidth;
@@ -440,6 +419,79 @@ function adjustTableClass() {
 }
 window.onload = adjustTableClass;
 window.onresize = adjustTableClass;
+
+function vozvratEscape(text) {
+  return $('<div>').text(text === null || text === undefined ? '' : text).html();
+}
+
+function resetVozvratBasket() {
+  $("#backet").find('tr').not('#add').remove();
+  $("#backet").attr("data-count", 0);
+  $("#backet").attr("data-count-sum", 0);
+  $("#backet").attr("data-increment", 0);
+  $("#all").text(0);
+  $("#all_sum").text(0);
+  $('input[name="product_details"]').val('');
+}
+
+function renderClientProducts(rows) {
+  var grouped = {};
+  (rows || []).forEach(function(row) {
+    if (!grouped[row.brand_id]) grouped[row.brand_id] = {name: row.brand_name, rows: []};
+    grouped[row.brand_id].rows.push(row);
+  });
+
+  var html = '';
+  Object.keys(grouped).forEach(function(brandId) {
+    html += '<tr class="handle-header"><td colspan="5" style="background-color:#a0d9ea;"><b style="color:red">' + vozvratEscape(grouped[brandId].name) + '</b></td><td style="background-color:#a0d9ea;"></td></tr>';
+    grouped[brandId].rows.forEach(function(row, idx) {
+      html += '<tr class="handle" id="source_' + row.source_product_history_id + '" ' +
+        'data-name="' + vozvratEscape(String(row.product_name || '').toLowerCase()) + '" ' +
+        'data-brand-id="' + row.brand_id + '" ' +
+        'data-category-id="' + row.product_category_id + '" ' +
+        'data-amount-row="brand_' + row.brand_id + '_amount">' +
+        '<td style="border-top:1px solid #bebabaff; border-bottom:1px solid #bebabaff; border-left:none; border-right:none;background-color:#efdfdf;width: 15%;"><b>' + (idx + 1) + '</b><br><small>' + vozvratEscape(row.order_date) + '</small></td>' +
+        '<td style="border-top:1px solid #bebabaff; border-bottom:1px solid #bebabaff; border-left:none; border-right:none;background-color:#efdfdf;width: 15%;"><b>' + vozvratEscape(row.brand_name) + '</b></td>' +
+        '<td style="border-top:1px solid #bebabaff; border-bottom:1px solid #bebabaff; border-left:none; border-right:none;background-color:#efdfdf;width: 15%;"><b>' + vozvratEscape(row.product_name) + '</b></td>' +
+        '<td style="border-top:1px solid #bebabaff; border-bottom:1px solid #bebabaff; border-left:none; border-right:none;background-color:#efdfdf;width: 15%;"><b>' + vozvratEscape(row.size) + '</b></td>' +
+        '<td style="border-top:1px solid #bebabaff; border-bottom:1px solid #bebabaff; border-left:none; border-right:none;background-color:#efdfdf;width: 15%; color:#8f302d;font-size:14px"><b>' + row.remaining_count + '</b></td>' +
+        '<td style="border-top:1px solid #bebabaff; border-bottom:1px solid #bebabaff; border-left:none; border-right:none;background-color:#efdfdf;width: 15%;"><b>' + vozvratEscape(row.type_name) + '</b></td>' +
+        '<td style="display:none;">' + row.warehouse_id + '</td>' +
+        '<td style="display:none;" class="source-order-history-id">' + row.source_order_history_id + '</td>' +
+        '<td style="display:none;" class="source-price">' + row.price + '</td>' +
+        '</tr>';
+    });
+    html += '<tr class="brand_' + brandId + '_amount"></tr>';
+  });
+
+  if (!html) {
+    html = '<tr class="empty-client-products"><td colspan="6" style="background-color:#efdfdf;text-align:center;color:#8f302d;"><b>Bu mijozda vozvrat qilinadigan mahsulot yoq.</b></td></tr>';
+  }
+
+  $("#showRes").html(html);
+  bcApplyFilter();
+}
+
+function loadClientProductsForVozvrat(clientId) {
+  resetVozvratBasket();
+  if (!clientId) {
+    renderClientProducts([]);
+    return;
+  }
+
+  $("#showRes").html('<tr><td colspan="6" style="text-align:center;background-color:#efdfdf;"><b>Yuklanmoqda...</b></td></tr>');
+  $.getJSON(VOZVRAT_CLIENT_PRODUCTS_URL, {client_id: clientId})
+    .done(function(res) {
+      if (!res || !res.success) {
+        $("#showRes").html('<tr><td colspan="6" style="text-align:center;background-color:#efdfdf;color:#8f302d;"><b>' + vozvratEscape(res && res.message ? res.message : 'Mahsulotlar yuklanmadi.') + '</b></td></tr>');
+        return;
+      }
+      renderClientProducts(res.rows || []);
+    })
+    .fail(function() {
+      $("#showRes").html('<tr><td colspan="6" style="text-align:center;background-color:#efdfdf;color:#8f302d;"><b>Mahsulotlar yuklanmadi.</b></td></tr>');
+    });
+}
 
 $("#myselect").change(function () {
   var clientId = $(this).val();
@@ -469,6 +521,8 @@ $("select#myselect").change(function(){
 
   var payButton = document.getElementById('payButton');
   if (payButton) payButton.disabled = !this.value;
+
+  loadClientProductsForVozvrat(this.value);
 });
 
 function loadMoreContent() {
@@ -485,7 +539,7 @@ function loadMoreContent() {
   }
 }
 
-/* Sizning eski #cars filtr kodingiz — element yo'q bo'lsa ham zarar qilmaydi */
+/* Sizning eski #cars filtr kodingiz вЂ” element yo'q bo'lsa ham zarar qilmaydi */
 $('#cars').on('change', function(e){
   e.preventDefault();
   const value = ($(this).val() || '').toUpperCase();
@@ -610,8 +664,9 @@ $(".buy_product").on('click', function(){
         count: $(this).children().eq(7).text(),
         all_sum: $(this).children().eq(8).text(),
         product_id: $(this).children().eq(9).text(),
-        brand_id: $(this).children().eq(10).text(),             // 🔥 yangi
-        product_category_id: $(this).children().eq(11).text(),  // 🔥 yangi
+        brand_id: $(this).children().eq(10).text(),             // рџ”Ґ yangi
+        product_category_id: $(this).children().eq(11).text(),
+        source_order_history_id: $(this).children().eq(12).text(),
       });
 
     }
@@ -630,7 +685,7 @@ $(".buy_product").on('click', function(){
   $("#modal-dialog").modal("toggle");
 });
 
-$('.handle').on("click", function(){
+$(document).on("click", ".handle", function(){
   $(".error_message").text("");
   $('input[name="maxsulot_narxi"]').val("");
   $('input[name="soni"]').val("");
@@ -642,7 +697,9 @@ $('.handle').on("click", function(){
   let name = $(this).children().eq(2).text();
   let size = $(this).children().eq(3).text();
   let product_id = $(this).children().eq(6).text();
-  // YANGI QO‘SHIMCHA: brand_id va product_category_id ni data-* dan olish
+  let source_order_history_id = $(this).children().eq(7).text();
+  let source_price = $(this).children().eq(8).text();
+  // YANGI QOвЂSHIMCHA: brand_id va product_category_id ni data-* dan olish
   let brand_id = $(this).data('brand-id') || '';
   let product_category_id = $(this).data('category-id') || '';
 
@@ -655,12 +712,14 @@ $('.handle').on("click", function(){
 
   $('input[name="product_id"]').val(product_id);
   $('input[name="soni"]').val(count);
+  $('input[name="maxsulot_narxi"]').val(source_price);
   $('input[name="size"]').val(size);
   $('input[name="maxsulot_tipi"]').val(maxsulot_tipi);
   $('input[name="key"]').val($(this).attr('id'));
   // brand_id va category_id ni ham formaga yozamiz
   $('input[name="brand_id"]').val(brand_id);
   $('input[name="product_category_id"]').val(product_category_id);
+  $('input[name="source_order_history_id"]').val(source_order_history_id);
 
   $("#modal-dialog2").modal();
 });
@@ -675,6 +734,7 @@ $(".submit").on("click", function(event){
   let name            = $('#name').text();
   let marka           = $('#marka').text();
   let product_id      = $('input[name="product_id"]').val();
+  let source_order_history_id = $('input[name="source_order_history_id"]').val();
   let size            = $('input[name="size"]').val();
   let maxsulot_tipi   = $('input[name="maxsulot_tipi"]').val();
 
@@ -696,6 +756,10 @@ $(".submit").on("click", function(event){
     $(".error_message").text("Manfiy son kiritib bo'lmaydi");
     return false;
   }
+  if(count_product > count_old){
+    $(".error_message").text("Mijozda qolgan sondan ko'p vozvrat qilib bo'lmaydi. Qoldiq: " + count_old);
+    return false;
+  }
   if (!String(price || '').length) {
     $(".error_message_narx").text("Mahsulot narxini kiriting.");
     return false;
@@ -705,6 +769,7 @@ $(".submit").on("click", function(event){
     return false;
   }
   count_old = count_old - count_product;
+  $("#" + key).children().eq(4).text(count_old);
 
   var amountRowClass = $("#" + key).attr("data-amount-row") || "";
   var aVal = amountRowClass ? $("." + amountRowClass).children().eq(2).text() : "0";
@@ -718,7 +783,7 @@ $(".submit").on("click", function(event){
 
 
   $("#add").before(
-    "<tr>" +
+    "<tr data-source-row='" + key + "'>" +
     "<td style='background-color:#efdfdf;'><b>" + increment + "</b></td>" +
     "<td style='background-color:#efdfdf;'>" + maxsulot_joyi + "</td>" +
     "<td style='background-color:#efdfdf;'><b>" + marka + "</b></td>" +
@@ -731,6 +796,7 @@ $(".submit").on("click", function(event){
     "<td style='display:none;'>" + product_id + "</td>" +
     "<td style='display:none;' class='brand-id'>" + brand_id + "</td>" +
     "<td style='display:none;' class='category-id'>" + product_category_id + "</td>" +
+    "<td style='display:none;' class='source-order-history-id'>" + source_order_history_id + "</td>" +
     "<td style='background-color:#efdfdf;'><button class='btn btn-sm btn-danger delete-product'><i class='glyphicon glyphicon-remove'></i></button></td>" +
     "</tr>"
   );
@@ -749,6 +815,11 @@ $(document).on("click", ".delete-product", function() {
   let row = $(this).closest("tr");
   let decrementCount = parseInt(row.find("td:eq(7)").text() || '0', 10);
   let increment = parseInt($("#backet").attr("data-increment") || '0', 10);
+  let sourceRowId = row.attr('data-source-row') || '';
+  if (sourceRowId && $("#" + sourceRowId).length) {
+    let sourceCount = parseInt($("#" + sourceRowId).children().eq(4).text() || '0', 10);
+    $("#" + sourceRowId).children().eq(4).text(sourceCount + decrementCount);
+  }
 
   let currentCount = parseInt($("#backet").attr("data-count") || '0', 10);
   let currentSum   = parseFloat($("#backet").attr("data-count-sum") || '0');
@@ -774,7 +845,7 @@ $(document).on("click", ".delete-product", function() {
     }
   });
 });
-/* productSearch elementi endi yo‘q — himoya bilan qoldiramiz */
+/* productSearch elementi endi yoвЂq вЂ” himoya bilan qoldiramiz */
 var ps = document.getElementById("productSearch");
 if (ps){
   ps.addEventListener("input", function () {
@@ -796,7 +867,7 @@ if (ci){
   });
 }
 
-/***** BRAND → CATEGORY yuklash + jadvalni filtrlash (asosiy qo'shimcha) *****/
+/***** BRAND в†’ CATEGORY yuklash + jadvalni filtrlash (asosiy qo'shimcha) *****/
 
 // Kategoriyalarni AJAX bilan yuklash
 function bcLoadCategories(brandId){
@@ -857,12 +928,12 @@ function bcApplyFilter(){
   }
 }
 
-// Brand o'zgarganda — kategoriyalarni yuklab, filtrlash
+// Brand o'zgarganda вЂ” kategoriyalarni yuklab, filtrlash
 $('#brandFilter').on('change', function(){
   bcLoadCategories($(this).val());
 });
 
-// Kategoriya o'zgarganda — filtrlash
+// Kategoriya o'zgarganda вЂ” filtrlash
 $('#categoryFilter').on('change', function(){
   bcApplyFilter();
 });
@@ -880,15 +951,15 @@ $('#bcClearFilters').on('click', function () {
   // Brandni tozalash
   $('#brandFilter').val(null).trigger('change.select2');
 
-  // Kategoriyani tozalash va o‘chirib qo‘yish
+  // Kategoriyani tozalash va oвЂchirib qoвЂyish
   var $cat = $('#categoryFilter');
   $cat.prop('disabled', true).html('').val(null).trigger('change.select2');
 
-  // Ichki yordamchi funksiyalar orqali jadvalni qayta ko‘rsatish
+  // Ichki yordamchi funksiyalar orqali jadvalni qayta koвЂrsatish
   if (typeof bcLoadCategories === 'function') bcLoadCategories(null);
   if (typeof bcApplyFilter   === 'function') bcApplyFilter();
   else {
-    // fallback: hammasini ko‘rsatib yuboramiz
+    // fallback: hammasini koвЂrsatib yuboramiz
     $('#showRes .handle').show();
     $('#showRes .handle-header').show();
   }

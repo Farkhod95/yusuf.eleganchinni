@@ -304,6 +304,7 @@ class OrderAccountHistoryController extends Controller
             ->andWhere(['size' => $sizeNum])
             ->andWhere(['type' => $typeId])
             ->andWhere(['type_sklad_id' => 1])
+            ->andWhere(['or', ['vozvrat_order_id' => null], ['vozvrat_order_id' => 0]])
             ->sum('count');
 
         return [
@@ -1545,7 +1546,12 @@ class OrderAccountHistoryController extends Controller
     }
     public function actionClientExportView($order_id, $cr_date, $customer_fio, $client_id, $link="client-product-history", $start_date, $end_date)
     {    
-        $orderProducts = ProductAccountHistory::find()->where(['order_account_history_id' => $order_id])->select(['brand_id'])->groupBy(['brand_id'])->all();
+        $orderProducts = ProductAccountHistory::find()
+            ->where(['order_account_history_id' => $order_id])
+            ->andWhere(['or', ['vozvrat_order_id' => null], ['vozvrat_order_id' => 0]])
+            ->select(['brand_id'])
+            ->groupBy(['brand_id'])
+            ->all();
         return $this->render('export_view_client', ['orderProducts' => $orderProducts, 'cr_date' => $cr_date, 'customer_fio' => $customer_fio, 'client_id' => $client_id, 'order_id' => $order_id, 'link' => $link, 'start_date' => $start_date, 'end_date' => $end_date]);
     }
 
@@ -1742,7 +1748,12 @@ class OrderAccountHistoryController extends Controller
         
         $array_Products = [];
         foreach($orders as $val) {
-            $orderProducts = ProductAccountHistory::find()->where(['order_account_history_id' => $val['id']])->select(['brand_id'])->groupBy(['cr_date'])->all();
+            $orderProducts = ProductAccountHistory::find()
+                ->where(['order_account_history_id' => $val['id']])
+                ->andWhere(['or', ['vozvrat_order_id' => null], ['vozvrat_order_id' => 0]])
+                ->select(['brand_id'])
+                ->groupBy(['cr_date'])
+                ->all();
             foreach($orderProducts as $value) {
                 $array_Products []= [
                     'brand_id' => $value['brand_id'],
@@ -1972,20 +1983,35 @@ class OrderAccountHistoryController extends Controller
     
     public function actionExportView($order_id, $cr_date, $customer_fio, $link="client-history")
     {    
-        $orderProducts = ProductAccountHistory::find()->where(['order_account_history_id' => $order_id])->select(['brand_id'])->groupBy(['brand_id'])->all();
+        $orderProducts = ProductAccountHistory::find()
+            ->where(['order_account_history_id' => $order_id])
+            ->andWhere(['or', ['vozvrat_order_id' => null], ['vozvrat_order_id' => 0]])
+            ->select(['brand_id'])
+            ->groupBy(['brand_id'])
+            ->all();
         return $this->render('export_view', ['orderProducts' => $orderProducts, 'cr_date' => $cr_date, 'customer_fio' => $customer_fio, 'order_id' => $order_id, 'link' => $link]);
     }
     
     public function actionProducts($id, $type)
     {    
-        $warehouse = ProductAccountHistory::find()->where(['order_account_history_id' => $id])->select(['brand_id'])->groupBy(['brand_id'])->all();
+        $warehouse = ProductAccountHistory::find()
+            ->where(['order_account_history_id' => $id])
+            ->andWhere(['or', ['vozvrat_order_id' => null], ['vozvrat_order_id' => 0]])
+            ->select(['brand_id'])
+            ->groupBy(['brand_id'])
+            ->all();
         // $warehouses = Warehouse::find()->all();
         return $this->render('products', ['warehouse' => $warehouse, 'order_id' => $id, 'type'=> $type]);
     }
 
     public function actionProductsTrash($id)
     {    
-        $warehouse = ProductAccountHistory::find()->where(['order_account_history_id' => $id])->select(['brand_id'])->groupBy(['brand_id'])->all();
+        $warehouse = ProductAccountHistory::find()
+            ->where(['order_account_history_id' => $id])
+            ->andWhere(['or', ['vozvrat_order_id' => null], ['vozvrat_order_id' => 0]])
+            ->select(['brand_id'])
+            ->groupBy(['brand_id'])
+            ->all();
         // $warehouses = Warehouse::find()->all();
         return $this->render('products_trash', ['warehouse' => $warehouse, 'order_id' => $id]);
     }
@@ -2221,7 +2247,10 @@ class OrderAccountHistoryController extends Controller
                 throw new BadRequestHttpException('Buyurtmada mahsulot bolishi kerak.');
             }
 
-            $productAccountHistory = ProductAccountHistory::find()->where(['order_account_history_id' => $id])->all();
+            $productAccountHistory = ProductAccountHistory::find()
+                ->where(['order_account_history_id' => $id])
+                ->andWhere(['or', ['vozvrat_order_id' => null], ['vozvrat_order_id' => 0]])
+                ->all();
             $oldStockByKey = [];
             foreach ($productAccountHistory as $oldValue) {
                 if ((int)$oldValue->type_sklad_id === 1) {
@@ -2316,6 +2345,7 @@ class OrderAccountHistoryController extends Controller
                 foreach ($productAccountHistory as $value) {
                     $oldProductAccount = ProductAccount::find()
                         ->andWhere(['order_account_id' => $orderAccount->id])
+                        ->andWhere(['or', ['vozvrat_order_id' => null], ['vozvrat_order_id' => 0]])
                         ->andWhere(['brand_id' => (int)$value->brand_id])
                         ->andWhere(['product_category_id' => (int)$value->product_category_id])
                         ->andWhere(['type' => (int)$value->type])
@@ -2393,6 +2423,7 @@ class OrderAccountHistoryController extends Controller
 
                     $productAccount = ProductAccount::find()
                         ->andWhere(['order_account_id' => $orderAccount->id])
+                        ->andWhere(['or', ['vozvrat_order_id' => null], ['vozvrat_order_id' => 0]])
                         ->andWhere(['brand_id' => (int)$brand_list->id])
                         ->andWhere(['product_category_id' => (int)$product_category_list->id])
                         ->andWhere(['type' => $value_type])

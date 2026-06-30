@@ -154,34 +154,71 @@ class VozvratOrderController extends Controller
 
     public function actionVozvrat()
     {    
-        // $warehouse = Warehouse::find()->select(['brand_id'])->groupBy(['brand_id'])->orderBy(['product_category.sorting' => SORT_ASC])->all();
-            
-        $warehouses = Warehouse::find()
-            ->alias('p')
+        return $this->render('vozvrat', [
+            'warehouse' => [],
+            'warehouseByBrand' => [],
+        ]);
+    }
+
+    public function actionClientProducts($client_id)
+    {
+        Yii::$app->response->format = Response::FORMAT_JSON;
+
+        $clientId = (int)$client_id;
+        if (!$clientId || !Client::findOne($clientId)) {
+            return ['success' => false, 'message' => 'Mijoz topilmadi.', 'rows' => []];
+        }
+
+        $soldRows = ProductAccountHistory::find()
+            ->alias('pah')
             ->with(['brand', 'productCategory'])
-            ->leftJoin("brands b", "p.brand_id = b.id")
-            ->leftJoin("product_category pc", "p.product_category_id = pc.id")
-            ->where(['b.sup_status' => 1])
-            ->orderBy(['b.sorting' => SORT_ASC, 'pc.sorting' => SORT_ASC])
+            ->innerJoin('order_account_history oah', 'oah.id = pah.order_account_history_id')
+            ->where(['oah.client_id' => $clientId])
+            ->andWhere(['or', ['pah.vozvrat_order_id' => null], ['pah.vozvrat_order_id' => 0]])
+            ->andWhere(['or', ['oah.is_delete' => 0], ['oah.is_delete' => null]])
+            ->orderBy(['oah.cr_date_time' => SORT_DESC, 'pah.id' => SORT_DESC])
             ->all();
 
-        $warehouse = [];
-        $warehouseByBrand = [];
-        foreach ($warehouses as $item) {
-            if (!isset($warehouseByBrand[$item->brand_id])) {
-                $warehouseByBrand[$item->brand_id] = [];
-                $warehouse[] = $item;
+        $rows = [];
+        foreach ($soldRows as $sold) {
+            $remaining = $this->getVozvratRemainingCount($sold);
+            if ($remaining <= 0) {
+                continue;
             }
-            $warehouseByBrand[$item->brand_id][] = $item;
+
+            $warehouse = Warehouse::find()
+                ->where([
+                    'brand_id' => (int)$sold->brand_id,
+                    'product_category_id' => (int)$sold->product_category_id,
+                    'size' => (float)$sold->size,
+                    'type' => (int)$sold->type,
+                ])
+                ->one();
+
+            if (!$warehouse || !$sold->brand || !$sold->productCategory) {
+                continue;
+            }
+
+            $orderDate = $sold->orderAccountHistory ? $sold->orderAccountHistory->cr_date_time : $sold->cr_date;
+            $rows[] = [
+                'source_order_history_id' => (int)$sold->order_account_history_id,
+                'source_product_history_id' => (int)$sold->id,
+                'order_date' => $orderDate ? date('d.m.Y', strtotime($orderDate)) : '',
+                'warehouse_id' => (int)$warehouse->id,
+                'brand_id' => (int)$sold->brand_id,
+                'brand_name' => $sold->brand->name,
+                'product_category_id' => (int)$sold->product_category_id,
+                'product_name' => $sold->productCategory->name,
+                'size' => (string)$sold->size,
+                'type' => (int)$sold->type,
+                'type_name' => $sold->getTypeView($sold->type),
+                'type_sklad_id' => (int)$sold->type_sklad_id,
+                'remaining_count' => $remaining,
+                'price' => (float)$sold->price,
+            ];
         }
-        // echo "<pre>";
-        // print_r($warehouse);
-        // echo "<pre>";
-        // $warehouses = Warehouse::find()->all();
-        return $this->render('vozvrat', [
-            'warehouse' => $warehouse,
-            'warehouseByBrand' => $warehouseByBrand,
-        ]);
+
+        return ['success' => true, 'rows' => $rows];
     }
 
 
@@ -244,6 +281,8 @@ class VozvratOrderController extends Controller
             $totalProductSum = 0;
             $hasLargePrice = false;
             $typeView = new VozvratOrder();
+            $requestedBySource = [];
+            $sourceOrderHistoryIds = [];
 
             foreach ($contact as $index => $value) {
                 if (!is_array($value)) {
@@ -251,6 +290,7 @@ class VozvratOrderController extends Controller
                 }
 
                 $warehouseId = (int)(isset($value['product_id']) ? $value['product_id'] : 0);
+                $sourceOrderHistoryId = (int)(isset($value['source_order_history_id']) ? $value['source_order_history_id'] : 0);
                 $brandId = (int)(isset($value['brand_id']) ? $value['brand_id'] : 0);
                 $categoryId = (int)(isset($value['product_category_id']) ? $value['product_category_id'] : 0);
                 $typeId = (int)$typeView->getTypeNameView(isset($value['tip']) ? $value['tip'] : '');
@@ -266,8 +306,22 @@ class VozvratOrderController extends Controller
                 ])->one();
                 $typeSklad = TypeSklad::find()->where(['name' => isset($value['joy']) ? $value['joy'] : ''])->one();
                 $warehouse = Warehouse::findOne($warehouseId);
+                $sourceSoldRow = ProductAccountHistory::find()
+                    ->alias('pah')
+                    ->innerJoin('order_account_history oah', 'oah.id = pah.order_account_history_id')
+                    ->where(['pah.order_account_history_id' => $sourceOrderHistoryId])
+                    ->andWhere(['oah.client_id' => $client->id])
+                    ->andWhere(['or', ['pah.vozvrat_order_id' => null], ['pah.vozvrat_order_id' => 0]])
+                    ->andWhere([
+                        'pah.brand_id' => $brandId,
+                        'pah.product_category_id' => $categoryId,
+                        'pah.type' => $typeId,
+                        'pah.type_sklad_id' => $typeSklad ? (int)$typeSklad->id : 0,
+                    ])
+                    ->andWhere(['pah.size' => $size])
+                    ->one();
 
-                if (!$brand || !$category || !$typeSklad || !$warehouse || !$typeId) {
+                if (!$brand || !$category || !$typeSklad || !$warehouse || !$typeId || !$sourceSoldRow) {
                     throw new \RuntimeException(($index + 1) . "-qatorda mahsulot ma'lumotlari topilmadi.");
                 }
                 if ((int)$warehouse->brand_id !== $brandId || (int)$warehouse->product_category_id !== $categoryId || (int)$warehouse->type !== $typeId || (float)$warehouse->size !== $size) {
@@ -279,10 +333,19 @@ class VozvratOrderController extends Controller
                 if ($price < 0) {
                     throw new \RuntimeException(($index + 1) . "-qatorda narx manfiy bo'lishi mumkin emas.");
                 }
+                $remainingCount = $this->getVozvratRemainingCount($sourceSoldRow);
+                $sourceKey = implode(':', [$sourceOrderHistoryId, $brandId, $categoryId, $size, $typeId, (int)$typeSklad->id]);
+                if (!isset($requestedBySource[$sourceKey])) {
+                    $requestedBySource[$sourceKey] = 0;
+                }
+                $requestedBySource[$sourceKey] += $count;
+                if ($requestedBySource[$sourceKey] > $remainingCount) {
+                    throw new \RuntimeException(($index + 1) . "-qatorda vozvrat soni mijozda qolgan sondan katta. Qoldiq: " . $remainingCount);
+                }
 
-                $realPrice = 0;
+                $realPrice = (float)$sourceSoldRow->real_price;
                 $realPriceModel = Prices::find()->where(['warehouse_id' => $warehouse->id])->one();
-                if ($realPriceModel) {
+                if (!$realPrice && $realPriceModel) {
                     $realPrice = (float)$realPriceModel->price;
                 }
 
@@ -291,19 +354,22 @@ class VozvratOrderController extends Controller
                     $hasLargePrice = true;
                 }
 
-                $lineAmount = $price * $count;
+                $lineAmount = round($price * $count, 2);
                 $lineProfit = $realPrice > 0 ? ($price - $realPrice) * $count : 0;
                 $totalProductSum += $lineAmount;
 
                 $normalizedRows[] = [
                     'warehouse' => $warehouse,
+                    'source_order_history_id' => $sourceOrderHistoryId,
                     'brand_id' => $brandId,
                     'product_category_id' => $categoryId,
                     'type_sklad_id' => (int)$typeSklad->id,
                     'type' => $typeId,
                     'size' => $size,
                     'count' => $count,
+                    'old_count' => (int)$sourceSoldRow->count,
                     'price' => $price,
+                    'vozvrat_summa' => $lineAmount,
                     'real_price' => $realPrice,
                     'profit' => round($lineProfit, 2),
                     'is_debtor' => $lineHasLargePrice ? 1 : 0,
@@ -334,6 +400,7 @@ class VozvratOrderController extends Controller
             }
 
             foreach ($normalizedRows as $row) {
+                $sourceOrderHistoryIds[(int)$row['source_order_history_id']] = true;
                 $productAccount = ProductAccount::find()
                     ->andWhere(['vozvrat_order_id' => $vozvratOrder->id])
                     ->andWhere(['brand_id' => $row['brand_id']])
@@ -367,14 +434,17 @@ class VozvratOrderController extends Controller
 
                 $relativeHistory = new ProductAccountHistory();
                 $relativeHistory->order_account_id = $orderAccount->id;
+                $relativeHistory->order_account_history_id = $row['source_order_history_id'];
                 $relativeHistory->vozvrat_order_id = $vozvratOrder->id;
                 $relativeHistory->brand_id = $row['brand_id'];
                 $relativeHistory->product_category_id = $row['product_category_id'];
                 $relativeHistory->size = $row['size'];
                 $relativeHistory->count = $row['count'];
+                $relativeHistory->old_count = $row['old_count'];
                 $relativeHistory->given_count = $row['count'];
                 $relativeHistory->type = $row['type'];
                 $relativeHistory->price = $row['price'];
+                $relativeHistory->vozvrat_summa = $row['vozvrat_summa'];
                 $relativeHistory->real_price = $row['real_price'];
                 $relativeHistory->is_debtor = $row['is_debtor'];
                 $relativeHistory->type_sklad_id = $row['type_sklad_id'];
@@ -391,6 +461,10 @@ class VozvratOrderController extends Controller
                         throw new \RuntimeException('Ombor qoldig\'i yangilanmadi.');
                     }
                 }
+            }
+
+            if (!empty($sourceOrderHistoryIds)) {
+                OrderAccountHistory::updateAll(['is_vozvrat' => 1], ['id' => array_keys($sourceOrderHistoryIds)]);
             }
 
             if ($tasdiqCheck === 1) {
@@ -564,9 +638,11 @@ class VozvratOrderController extends Controller
             $relativeHistory->product_category_id      = $product_category_list->id;
             $relativeHistory->size                     = $size;
             $relativeHistory->count                    = $count;
+            $relativeHistory->old_count                = $count;
             $relativeHistory->given_count              = $count;
             $relativeHistory->type                     = $typeId;
             $relativeHistory->price                    = $price;
+            $relativeHistory->vozvrat_summa            = round($lineAmount, 2);
             $relativeHistory->real_price               = $price_real;
             $relativeHistory->is_debtor                = $hasLargePrice ? 1 : 0;
             $relativeHistory->type_sklad_id            = $type_sklad_list->id;
@@ -703,7 +779,11 @@ class VozvratOrderController extends Controller
             $tasdiq_check_new = isset(Yii::$app->request->post('VozvratOrder')['confirmation']) ? Yii::$app->request->post('VozvratOrder')['confirmation'] : 1;
 
             $productAccountHistory = ProductAccountHistory::find()->where(['vozvrat_order_id' => $id])->all();
+            $affectedOrderHistoryIds = [];
             foreach ($productAccountHistory as $value) {
+                if ((int)$value->order_account_history_id > 0) {
+                    $affectedOrderHistoryIds[] = (int)$value->order_account_history_id;
+                }
                 $warehouseValue = Warehouse::find()->where(['id' => $value->warehouse_id])->one();
                 if ($warehouseValue) {
                     if ($value->type_sklad_id == 1) {
@@ -713,6 +793,7 @@ class VozvratOrderController extends Controller
                 }
                 ProductAccountHistory::find()->where(['id' => $value['id']])->one()->delete();
             }
+            $this->refreshOrderHistoryVozvratFlags($affectedOrderHistoryIds);
             
             $exchange_rates_new = is_numeric($exchange_rates_new) && $exchange_rates_new != 0 ? $exchange_rates_new : 1; // Avoid division by zero
             $sum_dollars_new = is_numeric($sum_dollars_new) ? $sum_dollars_new : 0;
@@ -822,9 +903,11 @@ class VozvratOrderController extends Controller
                     $relativeHistory->product_category_id      = $product_category_list->id;
                     $relativeHistory->size                     = $value_size;
                     $relativeHistory->count                    = $value_count;
+                    $relativeHistory->old_count                = $value_count;
                     $relativeHistory->given_count              = $value_count;
                     $relativeHistory->type                     = $value_type;
                     $relativeHistory->price                    = $value_price;
+                    $relativeHistory->vozvrat_summa            = round($value_price * $value_count, 2);
                     $relativeHistory->real_price               = $price_real;
                     $relativeHistory->type_sklad_id            = $type_sklad_list->id;
                     $relativeHistory->profit                   = round($lineProfit, 2);
@@ -920,9 +1003,14 @@ class VozvratOrderController extends Controller
         }
 
         $productAccountHistory = ProductAccountHistory::find()->where(['vozvrat_order_id' => $id])->all();
+        $affectedOrderHistoryIds = [];
         foreach ($productAccountHistory as $value) {
+            if ((int)$value->order_account_history_id > 0) {
+                $affectedOrderHistoryIds[] = (int)$value->order_account_history_id;
+            }
             ProductAccountHistory::find()->where(['id' => $value['id']])->one()->delete();
         }
+        $this->refreshOrderHistoryVozvratFlags($affectedOrderHistoryIds);
         $productAccount = ProductAccount::find()->where(['vozvrat_order_id' => $id])->all();
         foreach ($productAccount as $value) {
             // echo "<pre>";
@@ -995,6 +1083,42 @@ class VozvratOrderController extends Controller
         }
 
         return is_numeric($value) ? (float)$value : 0;
+    }
+
+    private function refreshOrderHistoryVozvratFlags(array $orderHistoryIds)
+    {
+        $orderHistoryIds = array_values(array_unique(array_filter(array_map('intval', $orderHistoryIds))));
+        if (empty($orderHistoryIds)) {
+            return;
+        }
+
+        OrderAccountHistory::updateAll(['is_vozvrat' => 0], ['id' => $orderHistoryIds]);
+
+        $activeIds = ProductAccountHistory::find()
+            ->select('order_account_history_id')
+            ->where(['order_account_history_id' => $orderHistoryIds])
+            ->andWhere(['not', ['vozvrat_order_id' => null]])
+            ->groupBy('order_account_history_id')
+            ->column();
+
+        if (!empty($activeIds)) {
+            OrderAccountHistory::updateAll(['is_vozvrat' => 1], ['id' => $activeIds]);
+        }
+    }
+
+    private function getVozvratRemainingCount(ProductAccountHistory $soldRow)
+    {
+        $returnedCount = (int)ProductAccountHistory::find()
+            ->where(['order_account_history_id' => (int)$soldRow->order_account_history_id])
+            ->andWhere(['brand_id' => (int)$soldRow->brand_id])
+            ->andWhere(['product_category_id' => (int)$soldRow->product_category_id])
+            ->andWhere(['type' => (int)$soldRow->type])
+            ->andWhere(['type_sklad_id' => (int)$soldRow->type_sklad_id])
+            ->andWhere(['size' => (float)$soldRow->size])
+            ->andWhere(['not', ['vozvrat_order_id' => null]])
+            ->sum('count');
+
+        return max(0, (int)$soldRow->count - $returnedCount);
     }
 
     /**

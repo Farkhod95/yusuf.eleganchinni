@@ -45,8 +45,8 @@ class ProductAccountHistory extends \yii\db\ActiveRecord
     public function rules()
     {
         return [
-            [['order_account_id', 'order_account_history_id', 'brand_id', 'product_category_id', 'count', 'type', 'type_sklad_id', 'created_by', 'given_count', 'is_debtor', 'warehouse_id'], 'integer'],
-            [['size', 'price', 'real_price', 'profit'], 'number'],
+            [['order_account_id', 'order_account_history_id', 'brand_id', 'product_category_id', 'count', 'old_count', 'type', 'type_sklad_id', 'created_by', 'given_count', 'is_debtor', 'warehouse_id'], 'integer'],
+            [['size', 'price', 'real_price', 'profit', 'vozvrat_summa'], 'number'],
             [['cr_date'], 'safe'],
             // [['given_count'],'required'],
             [['brand_id'], 'exist', 'skipOnError' => true, 'targetClass' => Brands::className(), 'targetAttribute' => ['brand_id' => 'id']],
@@ -73,6 +73,7 @@ class ProductAccountHistory extends \yii\db\ActiveRecord
             'product_category_id' => 'Product Category ID',
             'size' => 'Size',
             'count' => 'Count',
+            'old_count' => 'Vozvratgacha soni',
             'type' => 'Type',
             'price' => 'Price',
             'real_price' => 'Real Price',
@@ -83,6 +84,7 @@ class ProductAccountHistory extends \yii\db\ActiveRecord
             'given_count' => 'Mijozga berilgan mahsulot soni',
             'is_debtor' => 'Narxda farq?',
             'vozvrat_order_id' => 'Vozvrat Order ID',
+            'vozvrat_summa' => 'Vozvrat summa',
             'warehouse_id' => 'Ombor',
         ];
     }

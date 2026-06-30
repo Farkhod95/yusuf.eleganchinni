@@ -35,7 +35,8 @@ use unclead\multipleinput\MultipleInput;
              <div class="col-md-12">
                     <?php echo $form->field($model, 'allValue')->widget(MultipleInput::className(), [
                         'id' => 'my_id',
-                        'allowEmptyList' => true,
+                        'allowEmptyList' => false,
+                        'min' => 1,
                         'enableGuessTitle' => true,
                         'columns' => [
                             [

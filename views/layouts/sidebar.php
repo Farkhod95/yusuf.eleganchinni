@@ -86,12 +86,12 @@ $model = Users::findOne(Yii::$app->user->identity->id);
                         'url' => ['/vozvrat-order/index'],
                         'visible' => $model->permission == 1 || $model->permission == 2 || $model->permission == 5 || $model->permission == 6 ? true : false,
                     ],
-                    [
-                        'label' => 'Mijoz umumiy buyurtmasi', 
-                        'icon' => 'shopping-basket', 
-                        'url' => ['/order-account/index'],
-                        'visible' => $model->permission == 1 || $model->permission == 2 || $model->permission == 5 || $model->permission == 6? true : false,
-                    ],
+                    // [
+                    //     'label' => 'Mijoz umumiy buyurtmasi', 
+                    //     'icon' => 'shopping-basket', 
+                    //     'url' => ['/order-account/index'],
+                    //     'visible' => $model->permission == 1 || $model->permission == 2 || $model->permission == 5 || $model->permission == 6? true : false,
+                    // ],
                     
                     // [
                     //     'label' => 'Buyurtmalar tarixi', 

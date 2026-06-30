@@ -28,6 +28,10 @@ $clientTypeList = [
     2 => 'Bozordagi mijoz',
     3 => 'Filial',
 ];
+$vozvratStatusList = [
+    1 => 'Bor',
+    0 => 'Yo\'q',
+];
 
 $showFilter = (int) Yii::$app->request->get('show_filter', 0);
 Yii::$app->session->set('oah_showFilter', (int)$showFilter);
@@ -240,7 +244,7 @@ $sumDebtRepaymentAllSummDollar = (float)($debtQuery->sum('dr.all_summ_dollar') ?
                                 </div>
 
 
-                                <div class="col-md-4 col-sm-6">
+                                <div class="col-md-3 col-sm-6">
                                     <div style="display:flex; gap:8px; width:100%;">
                                         <div style="flex:1;">
                                             <?= $form->field($searchModel, 'date_from')->widget(DatePicker::class, [
@@ -267,7 +271,20 @@ $sumDebtRepaymentAllSummDollar = (float)($debtQuery->sum('dr.all_summ_dollar') ?
                                     </div>
                                 </div>
 
-                                <div class="col-md-3 col-sm-6">
+                                <div class="col-md-2 col-sm-6">
+                                    <?= $form->field($searchModel, 'is_vozvrat')->widget(Select2::class, [
+                                        'data' => $vozvratStatusList,
+                                        'options' => [
+                                            'placeholder' => 'Vozvrat...',
+                                        ],
+                                        'pluginOptions' => [
+                                            'allowClear' => true,
+                                        ],
+                                        'size' => Select2::SMALL,
+                                    ])->label(false); ?>
+                                </div>
+
+                                <div class="col-md-2 col-sm-6">
                                     <div style="display:flex; gap:8px; justify-content:flex-end; align-items:flex-start;">
                                         <?= Html::submitButton('<i class="fa fa-search"></i> Qidirish', [
                                             'class' => 'btn btn-primary btn-sm',

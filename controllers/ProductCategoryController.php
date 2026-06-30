@@ -229,26 +229,7 @@ class ProductCategoryController extends Controller
                 $model->sup_status = 1;
                 $model->save(false);
 
-                // MultipleInput dan kelgan qiymatlar
-                $allValues = Yii::$app->request->post('ProductCategory')['allValue'] ?? [];
-             
-                if (!empty($allValues)) {
-                    foreach ($allValues as $row) {
-                        $sizeVal = (float)$row['size'];
-                        // "9,99" kabilarni ham qabul qilish uchun
-                        $sizeVal = str_replace(',', '.', trim((string)$sizeVal));
-                        if (!is_numeric($sizeVal)) {
-                            continue; // yoki xatoga tashlang
-                        }
-                        $bs = new BrandsSize();
-                        $bs->size = (float)$sizeVal;
-                        $bs->type = (float)$row['type'];
-                        $bs->brand_id = $model->brand_id;
-                        $bs->product_category_id = $model->id;
-                        $bs->save();
-                       
-                    }
-                }
+                $this->saveBrandSizes($model, Yii::$app->request->post('ProductCategory')['allValue'] ?? [], true);
                 
                 // Modalni yopamiz va jadvalni yangilaymiz
                 return [
@@ -270,6 +251,7 @@ class ProductCategoryController extends Controller
         if ($model->load($request->post()) && $model->save()) {
             $model->sup_status = 1;
             $model->save(false);
+            $this->saveBrandSizes($model, Yii::$app->request->post('ProductCategory')['allValue'] ?? [], true);
             return $this->redirect(['view','id'=>$model->id]);
         }
         return $this->render('create', ['model'=>$model]);
@@ -305,23 +287,7 @@ class ProductCategoryController extends Controller
             }else if($model->load($request->post()) && $model->save()){
                 $model->sup_status = 1;
                 $model->save(false);
-                $allValues_new = Yii::$app->request->post('ProductCategory')['allValue'];
-                // echo "<pre>";
-                // print_r($allValues_new);
-                // echo "<pre>";
-                if ($allValues_new) {
-                    BrandsSize::deleteAll(['product_category_id' => (int)$model->id]);
-                    foreach ($allValues_new as $row) {
-                        $bs = new BrandsSize();
-                        $bs->size = (float)$row['size'];
-                        $bs->type = (float)$row['type'];
-                        $bs->brand_id = $model->brand_id;
-                        $bs->product_category_id = $model->id;
-                        if (!$bs->save()) {
-                            throw new \Exception('BrandsSize xatolik: '.json_encode($bs->errors));
-                        }
-                    }
-                }
+                $this->saveBrandSizes($model, Yii::$app->request->post('ProductCategory')['allValue'] ?? [], true);
                         
 
                 return ['forceClose'=>true,'forceReload'=>'#crud-datatable-pjax'];   
@@ -340,11 +306,51 @@ class ProductCategoryController extends Controller
             *   Process for non-ajax request
             */
             if ($model->load($request->post()) && $model->save()) {
+                $model->sup_status = 1;
+                $model->save(false);
+                $this->saveBrandSizes($model, Yii::$app->request->post('ProductCategory')['allValue'] ?? [], true);
                 return $this->redirect(['view', 'id' => $model->id]);
             } else {
                 return $this->render('update', [
                     'model' => $model,
                 ]);
+            }
+        }
+    }
+
+    private function saveBrandSizes(ProductCategory $model, array $allValues, $replace = false)
+    {
+        $rows = [];
+        foreach ($allValues as $index => $row) {
+            $sizeVal = isset($row['size']) ? str_replace(',', '.', trim((string)$row['size'])) : '';
+            $typeVal = isset($row['type']) ? trim((string)$row['type']) : '';
+
+            if ($sizeVal === '' || !is_numeric($sizeVal)) {
+                throw new \RuntimeException(($index + 1) . '-qatorda o\'lcham noto\'g\'ri.');
+            }
+            if ($typeVal === '' || !array_key_exists((string)(int)$typeVal, $model->getType())) {
+                throw new \RuntimeException(($index + 1) . '-qatorda tip tanlanmagan.');
+            }
+
+            $rows[] = [
+                'size' => (float)$sizeVal,
+                'type' => (int)$typeVal,
+            ];
+        }
+
+        if ($replace) {
+            BrandsSize::deleteAll(['product_category_id' => (int)$model->id]);
+        }
+
+        foreach ($rows as $row) {
+            $bs = new BrandsSize();
+            $bs->size = $row['size'];
+            $bs->type = $row['type'];
+            $bs->brand_id = (int)$model->brand_id;
+            $bs->product_category_id = (int)$model->id;
+
+            if (!$bs->save()) {
+                throw new \RuntimeException('BrandsSize xatolik: ' . json_encode($bs->errors));
             }
         }
     }

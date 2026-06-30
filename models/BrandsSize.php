@@ -34,7 +34,7 @@ class BrandsSize extends \yii\db\ActiveRecord
         return [
             [['size'], 'number'],
             [['brand_id', 'product_category_id', 'type'], 'integer'],
-            [['brand_id', 'product_category_id', 'size'], 'required'],
+            [['brand_id', 'product_category_id', 'size', 'type'], 'required'],
             [['brand_id'], 'exist', 'skipOnError' => true, 'targetClass' => Brands::className(), 'targetAttribute' => ['brand_id' => 'id']],
             [['product_category_id'], 'exist', 'skipOnError' => true, 'targetClass' => ProductCategory::className(), 'targetAttribute' => ['product_category_id' => 'id']],
         ];
