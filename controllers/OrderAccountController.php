@@ -798,7 +798,7 @@ class OrderAccountController extends Controller
             ->with(['brand', 'productCategory'])
             ->leftJoin("brands b", "p.brand_id = b.id")
             ->leftJoin("product_category pc", "p.product_category_id = pc.id")
-            ->where(['b.sup_status' => 1])
+            ->where(['b.sup_status' => 1, 'pc.sup_status' => 1])
             ->orderBy(['b.sorting' => SORT_ASC, 'pc.sorting' => SORT_ASC])
             ->all();
 

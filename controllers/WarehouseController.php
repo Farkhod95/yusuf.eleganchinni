@@ -388,12 +388,15 @@ class WarehouseController extends Controller
     public function actionAllList()
     {    
         $warehouse = Warehouse::find()
-        ->alias('w')
-        ->select(["w.*", "pc.sorting"])
-        ->leftJoin("brands pc", "w.brand_id = pc.id")
-        // ->where(['w.type' => [2, 3]])
-        ->orderBy(['pc.sorting' => SORT_ASC])
-        ->groupBy(['w.brand_id'])->all();
+            ->alias('w')
+            ->with(['brand', 'productCategory'])
+            ->leftJoin('brands b', 'w.brand_id = b.id')
+            ->leftJoin('product_category pc', 'w.product_category_id = pc.id')
+            ->where(['b.sup_status' => 1, 'pc.sup_status' => 1])
+            // ->where(['w.type' => [2, 3]])
+            ->orderBy(['b.sorting' => SORT_ASC, 'pc.sorting' => SORT_ASC])
+            ->groupBy(['w.brand_id'])
+            ->all();
         // $warehouses = Warehouse::find()->all();
         return $this->render('all_list', ['warehouse' => $warehouse]);
     }

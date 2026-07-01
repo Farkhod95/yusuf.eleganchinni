@@ -15,7 +15,7 @@ use yii\helpers\Url;
 
 $brands = Brands::find()
     ->orderBy(['sorting' => SORT_ASC])
-    ->andWhere(['<>', 'sup_status', 0])
+    ->andWhere(['sup_status' => 1])
     ->all();
 
 $this->title = "Mahsulotlar ro'yxati";
@@ -42,10 +42,12 @@ if (!empty($brandIds)) {
     $allRows = Warehouse::find()
         ->alias('w')
         ->with(['brand', 'productCategory'])
+        ->leftJoin('brands b', 'w.brand_id = b.id')
         ->leftJoin('product_category pc', 'w.product_category_id = pc.id')
         ->andWhere(['w.brand_id' => $brandIds])
+        ->andWhere(['b.sup_status' => 1, 'pc.sup_status' => 1])
         ->orderBy([
-            'w.brand_id' => SORT_ASC,
+            'b.sorting' => SORT_ASC,
             'pc.sorting' => SORT_ASC,
             'w.id' => SORT_ASC,
         ])
