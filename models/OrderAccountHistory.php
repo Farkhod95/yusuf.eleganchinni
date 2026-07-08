@@ -750,18 +750,11 @@ class OrderAccountHistory extends \yii\db\ActiveRecord
         $orderAccount2 = OrderAccount::find()->where(['client_id' => $model->client_id])->one();
         $about = About::find()->where(['id' => 1])->one();
         $sum = (float) KeshbekHistory::find()->where(['client_id' => $model->client_id])->sum('keshbek_sum');
-        $debtRepayments = DebtRepayment::find()
-            ->where(['date' => $model->date])
-            ->andWhere(['client_id' => $model->client_id])
-            ->andWhere(['or',
-        ['!=', 'is_worker', 1],
-        ['is', 'is_worker', null]
-            ])
-            ->all();
+        $debtRepayments = $this->getDebtRepaymentQueryBeforeOrder($model)->all();
 
         $debtRepaymentall = 0;
         foreach ($debtRepayments as $value) { 
-            $debtRepaymentall = $debtRepaymentall + $value->all_summ_dollar;
+            $debtRepaymentall += (float)$value->all_summ_dollar + (float)$value->discount_amount;
         }
 
         $table = '';
@@ -920,7 +913,7 @@ class OrderAccountHistory extends \yii\db\ActiveRecord
         $effectivePaid = round((float)$model->all_summ_dollar, 2);
         $vozvratDebtDiscount = round($vozvratProductSum - $vozvratRefundSum, 2);
         $debtProductSum = round($originalProductSum - $vozvratDebtDiscount, 2);
-        $effectiveDebt = round((float)$model->total_debt_old + $debtProductSum - ($effectivePaid + (float)$model->discount_amount), 2);
+        $effectiveDebt = round((float)$model->total_debt_old + $debtProductSum - ($effectivePaid + (float)$model->discount_amount) - $debtRepaymentall, 2);
         $vozvratSummaryRows = '';
         if ($vozvratProductSum > 0) {
             $vozvratSummaryRows = '
@@ -1163,18 +1156,11 @@ class OrderAccountHistory extends \yii\db\ActiveRecord
         $warehouse = ProductAccountHistory::find()->where(['order_account_history_id' => $id])->andWhere(['or', ['vozvrat_order_id' => null], ['vozvrat_order_id' => 0]])->select(['brand_id'])->groupBy(['brand_id'])->all();
         $orderAccount2 = OrderAccount::find()->where(['client_id' => $model->client_id])->one();
         $about = About::find()->where(['id' => 1])->one();
-        $debtRepayments = DebtRepayment::find()
-            ->where(['date' => $model->date])
-            ->andWhere(['client_id' => $model->client_id])
-            ->andWhere(['or',
-        ['!=', 'is_worker', 1],
-        ['is', 'is_worker', null]
-            ])
-            ->all();
+        $debtRepayments = $this->getDebtRepaymentQueryBeforeOrder($model)->all();
 
         $debtRepaymentall = 0;
         foreach ($debtRepayments as $value) { 
-            $debtRepaymentall = $debtRepaymentall + $value->all_summ_dollar;
+            $debtRepaymentall += (float)$value->all_summ_dollar + (float)$value->discount_amount;
         }
 
         $table = '';

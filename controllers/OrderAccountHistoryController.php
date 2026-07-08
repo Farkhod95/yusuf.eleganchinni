@@ -107,45 +107,44 @@ class OrderAccountHistoryController extends Controller
             ->scalar();
     }
 
-    private function recalculateClientOrderDebts($clientId)
+    private function recalculateClientOrderDebtsAfter(OrderAccountHistory $model)
     {
-        $orders = OrderAccountHistory::find()
-            ->where(['client_id' => $clientId])
+        $previousDebt = (float)$model->total_debt;
+        $previousTime = $this->getHistoryCalcTime($model);
+
+        $nextOrders = OrderAccountHistory::find()
+            ->where(['client_id' => $model->client_id])
+            ->andWhere([
+                'or',
+                ['>', 'date', $model->date],
+                ['and', ['date' => $model->date], ['>', 'id', $model->id]]
+            ])
             ->andWhere(['or', ['!=', 'is_worker', 1], ['is', 'is_worker', null]])
             ->andWhere(['or', ['is_delete' => null], ['<>', 'is_delete', 1]])
             ->orderBy(['date' => SORT_ASC, 'id' => SORT_ASC])
             ->all();
 
-        if (!$orders) {
-            return;
-        }
+        foreach ($nextOrders as $nextOrder) {
+            $nextOrderTime = $this->getHistoryCalcTime($nextOrder, true);
+            $repaymentTotal = $this->getDebtRepaymentTotalBetween($model->client_id, $previousTime, $nextOrderTime);
 
-        $previousDebt = (float)$orders[0]->total_debt_old;
-        $previousTime = $this->getHistoryCalcTime($orders[0]);
-
-        foreach ($orders as $index => $order) {
-            $orderTime = $this->getHistoryCalcTime($order, true);
-            $repaymentTotal = $index === 0 ? 0.0 : $this->getDebtRepaymentTotalBetween($clientId, $previousTime, $orderTime);
-
-            $order->total_debt_old = $previousDebt;
-            $order->total_debt_today = round(
-                (float)$order->all_product_sum - ((float)$order->all_summ_dollar + (float)$order->discount_amount),
+            $nextOrder->total_debt_old = $previousDebt;
+            $nextOrder->total_debt_today = round(
+                (float)$nextOrder->all_product_sum - ((float)$nextOrder->all_summ_dollar + (float)$nextOrder->discount_amount),
                 2
             );
-            $order->total_debt = round(
-                (float)$order->total_debt_old + (float)$order->total_debt_today - $repaymentTotal,
+            $nextOrder->total_debt = round(
+                (float)$nextOrder->total_debt_old + (float)$nextOrder->total_debt_today - $repaymentTotal,
                 2
             );
-            $order->save(false);
+            $nextOrder->save(false);
 
-            $previousDebt = (float)$order->total_debt;
-            $previousTime = $orderTime;
+            $previousDebt = (float)$nextOrder->total_debt;
+            $previousTime = $nextOrderTime;
         }
 
-        $lastOrder = end($orders);
-        $lastTime = $this->getHistoryCalcTime($lastOrder, true);
-        $afterLastRepayment = $this->getDebtRepaymentTotalBetween($clientId, $lastTime);
-        $orderAccount = OrderAccount::find()->where(['client_id' => $clientId])->one();
+        $afterLastRepayment = $this->getDebtRepaymentTotalBetween($model->client_id, $previousTime);
+        $orderAccount = OrderAccount::find()->where(['client_id' => $model->client_id])->one();
 
         if ($orderAccount) {
             $orderAccount->total_debt = round($previousDebt - $afterLastRepayment, 2);
@@ -2647,7 +2646,7 @@ class OrderAccountHistoryController extends Controller
                 $model->all_product_sum = $all_product_summ_new;
                 $model->order_account_status = $tasdiq_check_new;
                 $model->save(false);
-                $this->recalculateClientOrderDebts($client_id);
+                $this->recalculateClientOrderDebtsAfter($model);
                 $model->refresh();
                 $orderAccount->refresh();
 
