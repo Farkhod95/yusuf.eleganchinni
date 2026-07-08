@@ -79,6 +79,81 @@ class OrderAccountHistoryController extends Controller
         ];
     }
 
+    private function getHistoryCalcTime($model, $endOfDay = false)
+    {
+        if (!empty($model->cr_date_time)) {
+            return date('Y-m-d H:i:s', strtotime($model->cr_date_time));
+        }
+
+        $date = !empty($model->date) ? $model->date : $model->cr_date;
+        return date('Y-m-d', strtotime($date)) . ($endOfDay ? ' 23:59:59' : ' 00:00:00');
+    }
+
+    private function getDebtRepaymentTotalBetween($clientId, $fromTime, $toTime = null)
+    {
+        $timeExpression = "COALESCE(cr_date_time, CONCAT(`date`, ' 23:59:59'))";
+        $query = DebtRepayment::find()
+            ->where(['client_id' => $clientId])
+            ->andWhere(['or', ['!=', 'is_worker', 1], ['is', 'is_worker', null]])
+            ->andWhere(['or', ['is_delete' => null], ['<>', 'is_delete', 1]])
+            ->andWhere($timeExpression . ' > :fromTime', [':fromTime' => $fromTime]);
+
+        if ($toTime !== null) {
+            $query->andWhere($timeExpression . ' <= :toTime', [':toTime' => $toTime]);
+        }
+
+        return (float)$query
+            ->select(new Expression('COALESCE(SUM(COALESCE(all_summ_dollar, 0) + COALESCE(discount_amount, 0)), 0)'))
+            ->scalar();
+    }
+
+    private function recalculateClientOrderDebts($clientId)
+    {
+        $orders = OrderAccountHistory::find()
+            ->where(['client_id' => $clientId])
+            ->andWhere(['or', ['!=', 'is_worker', 1], ['is', 'is_worker', null]])
+            ->andWhere(['or', ['is_delete' => null], ['<>', 'is_delete', 1]])
+            ->orderBy(['date' => SORT_ASC, 'id' => SORT_ASC])
+            ->all();
+
+        if (!$orders) {
+            return;
+        }
+
+        $previousDebt = (float)$orders[0]->total_debt_old;
+        $previousTime = $this->getHistoryCalcTime($orders[0]);
+
+        foreach ($orders as $index => $order) {
+            $orderTime = $this->getHistoryCalcTime($order, true);
+            $repaymentTotal = $index === 0 ? 0.0 : $this->getDebtRepaymentTotalBetween($clientId, $previousTime, $orderTime);
+
+            $order->total_debt_old = $previousDebt;
+            $order->total_debt_today = round(
+                (float)$order->all_product_sum - ((float)$order->all_summ_dollar + (float)$order->discount_amount),
+                2
+            );
+            $order->total_debt = round(
+                (float)$order->total_debt_old + (float)$order->total_debt_today - $repaymentTotal,
+                2
+            );
+            $order->save(false);
+
+            $previousDebt = (float)$order->total_debt;
+            $previousTime = $orderTime;
+        }
+
+        $lastOrder = end($orders);
+        $lastTime = $this->getHistoryCalcTime($lastOrder, true);
+        $afterLastRepayment = $this->getDebtRepaymentTotalBetween($clientId, $lastTime);
+        $orderAccount = OrderAccount::find()->where(['client_id' => $clientId])->one();
+
+        if ($orderAccount) {
+            $orderAccount->total_debt = round($previousDebt - $afterLastRepayment, 2);
+            $orderAccount->total_debt_old = $orderAccount->total_debt;
+            $orderAccount->save(false);
+        }
+    }
+
     /**
      * Lists all OrderAccountHistory models.
      * @return mixed
@@ -2572,6 +2647,9 @@ class OrderAccountHistoryController extends Controller
                 $model->all_product_sum = $all_product_summ_new;
                 $model->order_account_status = $tasdiq_check_new;
                 $model->save(false);
+                $this->recalculateClientOrderDebts($client_id);
+                $model->refresh();
+                $orderAccount->refresh();
 
                 $elegantHistoryUpdate = new ElegantHistoryUpdate();
                 $elegantHistoryUpdate->title = $model->client->fio . " ning ". \Yii::$app->formatter->asDatetime(date('Y-m-d'), 'php:d.m.Y ') ." sanadagi buyurtmasi o'zgartirildi...";
@@ -2630,6 +2708,7 @@ class OrderAccountHistoryController extends Controller
                 //     $previousDebt = $nextOrder->total_debt;
                 //     $nextOrder->save();
                 // }
+                if (false) {
                 $nextOrders = OrderAccountHistory::find()
                     ->where(['client_id' => $model->client_id])
                     ->andWhere([
@@ -2666,6 +2745,7 @@ class OrderAccountHistoryController extends Controller
                     // Keyingi buyurtma uchun yuguruvchi qarz
                     $previousDebt = $nextOrder->total_debt;
                     $nextOrder->save(false);
+                }
                 }
 
 
